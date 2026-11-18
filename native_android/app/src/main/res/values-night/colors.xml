@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="wb_bg">#0E1016</color>
+    <color name="wb_surface">#14171F</color>
+    <color name="wb_container">#1C202B</color>
+    <color name="wb_container_high">#272C3B</color>
+    <color name="wb_on_surface">#E7E9F4</color>
+    <color name="wb_on_variant">#A3A9BD</color>
+    <color name="wb_outline">#3A4054</color>
+    <color name="wb_primary">#8F96FF</color>
+    <color name="wb_on_primary">#14163A</color>
+    <color name="wb_primary_container">#2E3270</color>
+    <color name="wb_green">#4ADE80</color>
+    <color name="wb_danger">#F87171</color>
+    <color name="wb_private">#A78BFA</color>
+    <color name="white">#FFFFFF</color>
+</resources>

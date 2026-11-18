@@ -1,0 +1,108 @@
+rules_version = '2';
+// WBrowser data model:
+//   users/{uid}                      profile + consent (uid = anonymous/Google Firebase Auth uid of the phone)
+//   users/{uid}/visits|searches|sessions/{id}
+//   admins/{uid}                     role info (written only by scripts/set-role.js with the Admin SDK)
+//   audit/{id}                       admin actions (append-only)
+// Roles live in the Firebase Auth custom claim `role`: superadmin | analyst.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function role() { return signedIn() && 'role' in request.auth.token ? request.auth.token.role : ''; }
+    function isAdmin() { return role() in ['superadmin', 'analyst']; }
+    function isSuper() { return role() == 'superadmin'; }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+    function profile(uid) { return get(/databases/$(database)/documents/users/$(uid)).data; }
+    // the user must exist, be active and have agreed to activity sharing
+    // remote settings the superadmin edits in the admin app (config/app); missing doc = defaults (everything on)
+    function cfgDoc() { return /databases/$(database)/documents/config/app; }
+    function trackingOn() { return !exists(cfgDoc()) || get(cfgDoc()).data.get('trackingEnabled', true) == true; }
+    function searchOn() { return !exists(cfgDoc()) || get(cfgDoc()).data.get('searchAllowed', true) == true; }
+    function canUpload(uid) { return isOwner(uid) && trackingOn() && profile(uid).status == 'active' && profile(uid).activityConsent == true; }
+    // admin accounts are never removable through the app
+    function isAdminUid(uid) { return exists(/databases/$(database)/documents/admins/$(uid)); }
+    function str(v, max) { return v is string && v.size() <= max; }
+
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow create: if isOwner(uid)
+        && request.resource.data.status == 'active'
+        && request.resource.data.activityConsent == true
+        && request.resource.data.searchConsent is bool
+        && str(request.resource.data.name, 80) && request.resource.data.name.size() > 0
+        && str(request.resource.data.userId, 24);
+      // owners can change their own data but never their status; only superadmin can suspend/reactivate
+      allow update: if (isOwner(uid)
+          && request.resource.data.status == resource.data.status
+          && str(request.resource.data.name, 80) && request.resource.data.name.size() > 0
+          && request.resource.data.activityConsent is bool && request.resource.data.searchConsent is bool)
+        || isSuper();
+      allow delete: if isOwner(uid) || (isSuper() && !isAdminUid(uid));
+
+      match /visits/{id} {
+        allow read: if isOwner(uid) || isAdmin();
+        allow create, update: if canUpload(uid)
+          && request.resource.data.keys().hasOnly(['url', 'domain', 'title', 'visitedAt', 'durationMs', 'sessionId'])
+          && str(request.resource.data.url, 2048) && request.resource.data.url.matches('^https?://.*')
+          && str(request.resource.data.domain, 253)
+          && str(request.resource.data.title, 300)
+          && request.resource.data.visitedAt is number
+          && request.resource.data.durationMs is number
+          && request.resource.data.durationMs >= 0 && request.resource.data.durationMs <= 86400000;
+        allow delete: if isOwner(uid) || isSuper();
+      }
+
+      match /searches/{id} {
+        allow read: if isOwner(uid) || isAdmin();
+        // search queries only while the user has switched search sharing on
+        allow create, update: if canUpload(uid) && searchOn() && profile(uid).searchConsent == true
+          && request.resource.data.keys().hasOnly(['query', 'engine', 'at'])
+          && str(request.resource.data.query, 500) && request.resource.data.query.size() > 0
+          && str(request.resource.data.engine, 30) && request.resource.data.at is number;
+        allow delete: if isOwner(uid) || isSuper();
+      }
+
+      match /sessions/{id} {
+        allow read: if isOwner(uid) || isAdmin();
+        allow create, update: if canUpload(uid)
+          && request.resource.data.keys().hasOnly(['startedAt', 'endedAt', 'durationMs'])
+          && request.resource.data.startedAt is number && request.resource.data.endedAt is number
+          && request.resource.data.durationMs is number
+          && request.resource.data.durationMs >= 0 && request.resource.data.durationMs <= 86400000;
+        allow delete: if isOwner(uid) || isSuper();
+      }
+    }
+
+    // admin dashboards read across all users
+    match /{path=**}/visits/{id} { allow read: if isAdmin(); }
+    match /{path=**}/searches/{id} { allow read: if isAdmin(); }
+    match /{path=**}/sessions/{id} { allow read: if isAdmin(); }
+
+    // remote settings: every signed-in app reads them, only a superadmin writes them (validated)
+    match /config/{doc} {
+      allow read: if signedIn();
+      allow create, update: if isSuper() && doc == 'app'
+        && request.resource.data.keys().hasOnly(['trackingEnabled', 'searchAllowed', 'uploadIntervalSeconds', 'retentionDays', 'announcement', 'updatedAt', 'updatedBy'])
+        && request.resource.data.trackingEnabled is bool && request.resource.data.searchAllowed is bool
+        && request.resource.data.uploadIntervalSeconds is number && request.resource.data.uploadIntervalSeconds >= 5 && request.resource.data.uploadIntervalSeconds <= 600
+        && request.resource.data.retentionDays is number && request.resource.data.retentionDays >= 1 && request.resource.data.retentionDays <= 3650
+        && str(request.resource.data.announcement, 200);
+      allow delete: if false;
+    }
+
+    // Admin access is decided by the sign-in claim, never by this record, so deleting it cannot lock anyone out.
+    // The record only feeds the Admins list; an admin can re-create their own (matching their claims) but never edit or delete it.
+    match /admins/{uid} {
+      allow read: if isOwner(uid) || isSuper();
+      allow create: if isOwner(uid) && isAdmin() && request.resource.data.role == role() && request.resource.data.email == request.auth.token.email;
+      allow update, delete: if false;
+    }
+
+    match /audit/{id} {
+      allow create: if isAdmin() && request.resource.data.by == request.auth.token.email;
+      allow read: if isSuper();
+      allow update, delete: if false;
+    }
+  }
+}

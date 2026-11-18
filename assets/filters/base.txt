@@ -1,0 +1,23 @@
+! Small built-in list so blocking works before the first download
+||doubleclick.net^
+||googlesyndication.com^
+||googleadservices.com^
+||google-analytics.com^
+||googletagmanager.com^$third-party
+||adservice.google.com^
+||ads.youtube.com^
+||facebook.net^$third-party,script
+||taboola.com^
+||outbrain.com^
+||adnxs.com^
+||criteo.com^
+||scorecardresearch.com^
+||popads.net^
+||propellerads.com^
+||exoclick.com^
+||adsterra.com^
+##.adsbygoogle
+##ins.adsbygoogle
+##[id^="google_ads_"]
+##.ad-banner
+##.advert

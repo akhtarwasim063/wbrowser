@@ -1,0 +1,584 @@
+// WBrowser Admin App (Firebase). Plain JS, no inline code (strict CSP). All dynamic text goes through textContent.
+import { api as fbApi, initFirebase, configured, csvDownload, refreshData } from './fb.js';
+(() => {
+  const root = document.getElementById('app');
+  let me = null;
+  // small per-browser preferences (theme, default date range, auto refresh)
+  const prefs = { get: (k, d) => { try { return localStorage.getItem('wba_' + k) ?? d; } catch { return d; } }, set: (k, v) => { try { localStorage.setItem('wba_' + k, v); } catch { /* ignore */ } } };
+  const applyTheme = () => { const t = prefs.get('theme', 'auto'); if (t === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t; };
+  applyTheme();
+  const filter = { preset: prefs.get('range', '7'), from: '', to: '' }; // shared date filter
+  let currentLoad = null, refreshTimer = null;
+
+  // ---------- tiny DOM helpers ----------
+  const h = (tag, attrs, ...kids) => {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (k === 'class') e.className = v;
+      else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+      else if (v !== false && v != null) e.setAttribute(k, v === true ? '' : v);
+    }
+    for (const kid of kids.flat(Infinity)) if (kid != null && kid !== false) e.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+    return e;
+  };
+  const NS = 'http://www.w3.org/2000/svg';
+  const s = (tag, attrs, ...kids) => {
+    const e = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
+    for (const kid of kids) if (kid != null) e.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+    return e;
+  };
+
+  // ---------- icons (stroke icons, 24px grid) ----------
+  const ICON = {
+    grid: 'M3 3h7v9H3z|M14 3h7v5h-7z|M14 12h7v9h-7z|M3 16h7v5H3z',
+    globe: 'M12 2a10 10 0 100 20 10 10 0 000-20z|M2 12h20|M12 2c3 3 3 17 0 20|M12 2c-3 3-3 17 0 20',
+    clock: 'M12 2a10 10 0 100 20 10 10 0 000-20z|M12 6v6l4 2',
+    users: 'M17 21v-2a4 4 0 00-4-4H7a4 4 0 00-4 4v2|M10 11a4 4 0 100-8 4 4 0 000 8z|M21 21v-2a4 4 0 00-3-3.9|M16 3.1a4 4 0 010 7.8',
+    user: 'M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2|M12 11a4 4 0 100-8 4 4 0 000 8z',
+    userplus: 'M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2|M9 11a4 4 0 100-8 4 4 0 000 8z|M19 8v6|M22 11h-6',
+    activity: 'M22 12h-4l-3 9L9 3l-3 9H2',
+    shield: 'M12 2l8 3v6c0 5-3.5 9-8 11-4.5-2-8-6-8-11V5z|M9 12l2 2 4-4',
+    db: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z|M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6|M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6',
+    list: 'M8 6h13|M8 12h13|M8 18h13|M3 6h.01|M3 12h.01|M3 18h.01',
+    layers: 'M12 2l10 5-10 5L2 7z|M2 17l10 5 10-5|M2 12l10 5 10-5',
+    out: 'M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4|M16 17l5-5-5-5|M21 12H9',
+    search: 'M11 19a8 8 0 100-16 8 8 0 000 16z|M21 21l-4.3-4.3',
+    download: 'M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4|M7 10l5 5 5-5|M12 15V3',
+    trash: 'M3 6h18|M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2|M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6',
+    pause: 'M6 4h4v16H6z|M14 4h4v16h-4z',
+    back: 'M19 12H5|M12 19l-7-7 7-7',
+    check: 'M20 6L9 17l-5-5',
+    lock: 'M5 11h14v10H5z|M8 11V7a4 4 0 018 0v4',
+    refresh: 'M21 12a9 9 0 11-3-6.7|M21 3v6h-6',
+    gear: 'M12 15a3 3 0 100-6 3 3 0 000 6z|M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z',
+    chev: 'M9 18l6-6-6-6',
+  };
+  const ico = (n) => { const e = s('svg', { class: 'ic', viewBox: '0 0 24 24', 'aria-hidden': 'true' }); for (const d of ICON[n].split('|')) e.append(s('path', { d })); return e; };
+  const btn = (icon, text, attrs) => h('button', attrs, ico(icon), text);
+
+  // ---------- formatting ----------
+  const dur = (ms) => {
+    const t = Math.round((ms || 0) / 1000);
+    if (t < 60) return `${t}s`;
+    if (t < 3600) return `${Math.floor(t / 60)}m ${t % 60}s`;
+    return `${Math.floor(t / 3600)}h ${Math.floor((t % 3600) / 60)}m`;
+  };
+  const fmt = (n) => Number(n || 0).toLocaleString();
+  const dt = (ms) => (ms ? new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—');
+  const ago = (ms) => {
+    if (!ms) return 'never';
+    const d = Date.now() - ms;
+    if (d < 60000) return 'just now';
+    if (d < 3600000) return `${Math.floor(d / 60000)} min ago`;
+    if (d < 86400000) return `${Math.floor(d / 3600000)} h ago`;
+    return `${Math.floor(d / 86400000)} d ago`;
+  };
+  const online = (ms) => ms && Date.now() - ms < 5 * 60000;
+  // Only http(s) targets become links (URLs are untrusted data). Opens in a new tab, no referrer / opener.
+  const extLink = (href, text) => (/^https?:\/\//i.test(href) ? h('a', { href, target: '_blank', rel: 'noopener noreferrer', title: 'Open in new tab', onclick: (e) => e.stopPropagation() }, text) : text);
+  const siteLink = (domain) => extLink('https://' + domain, domain);
+
+  const initials = (n) => String(n || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
+  const tone = (str) => { let x = 0; for (const c of String(str)) x = (x * 31 + c.charCodeAt(0)) >>> 0; return 'c' + (x % 8); };
+  const avatar = (name, extra = '') => h('div', { class: `av ${tone(name)} ${extra}` }, initials(name));
+
+  const api = async (path, opts) => {
+    try { return await fbApi(path, opts); }
+    catch (e) { if (e.message === 'unauthorized' && path !== '/auth/login') { me = null; render(); throw new Error('Session expired'); } throw e; }
+  };
+  const can = (p) => me && me.permissions.includes(p);
+  const errBox = (e) => h('p', { class: 'err' }, e.message);
+  const loading = () => h('div', {}, h('div', { class: 'grid' }, [1, 2, 3, 4].map(() => h('div', { class: 'skeleton' }))), h('div', { class: 'skeleton' }));
+
+  // ---------- date filter ----------
+  function range() {
+    const to = filter.preset === 'custom' && filter.to ? new Date(filter.to + 'T23:59:59.999').getTime() : Date.now();
+    let from;
+    if (filter.preset === 'custom' && filter.from) from = new Date(filter.from + 'T00:00:00').getTime();
+    else if (filter.preset === 'today') { const d = new Date(); d.setHours(0, 0, 0, 0); from = d.getTime(); }
+    else from = Date.now() - parseInt(filter.preset, 10) * 86400000;
+    return `from=${from}&to=${to}&tz=${-new Date().getTimezoneOffset()}`;
+  }
+  const rangeLabel = () => (filter.preset === 'custom' ? `${filter.from || '…'} to ${filter.to || 'now'}` : filter.preset === 'today' ? 'today' : `last ${filter.preset} days`);
+
+  function dateBar(onChange) {
+    const seg = h('div', { class: 'seg' }, [['today', 'Today'], ['7', '7 days'], ['30', '30 days'], ['90', '90 days'], ['custom', 'Custom']].map(([v, l]) =>
+      h('button', { class: filter.preset === v ? 'on' : '', onclick: () => { filter.preset = v; render(); } }, l)));
+    const f = h('input', { type: 'date', value: filter.from, onchange: (e) => { filter.from = e.target.value; onChange(); } });
+    const t = h('input', { type: 'date', value: filter.to, onchange: (e) => { filter.to = e.target.value; onChange(); } });
+    return h('div', { class: 'row mb' }, seg, filter.preset === 'custom' ? [f, t] : null);
+  }
+
+  // ---------- charts ----------
+  let gid = 0;
+  function areaChart(rows, key, label, cls = '') {
+    if (!rows.length) return h('div', { class: 'empty' }, 'No data in this range.');
+    const W = 640, H = 200, L = 40, R = 10, T = 12, B = 26;
+    const max = Math.max(1, ...rows.map((r) => r[key] || 0));
+    const nice = Math.ceil(max / 4) * 4 || 4;
+    const x = (i) => L + (rows.length === 1 ? (W - L - R) / 2 : (i * (W - L - R)) / (rows.length - 1));
+    const y = (v) => T + (1 - v / nice) * (H - T - B);
+    const id = `g${++gid}`;
+    const svg = s('svg', { class: `chart ${cls}`, viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': label });
+    const defs = s('defs', {}, s('linearGradient', { id, x1: 0, y1: 0, x2: 0, y2: 1 }, s('stop', { class: 's1', offset: '0%', 'stop-opacity': '0.35' }), s('stop', { class: 's1', offset: '100%', 'stop-opacity': '0' })));
+    svg.append(defs);
+    for (let i = 0; i <= 4; i++) {
+      const v = (nice / 4) * i, yy = y(v);
+      svg.append(s('line', { class: 'gl', x1: L, x2: W - R, y1: yy, y2: yy }), s('text', { x: L - 8, y: yy + 3, 'text-anchor': 'end' }, fmt(Math.round(v))));
+    }
+    const pts = rows.map((r, i) => [x(i), y(r[key] || 0)]);
+    let d = `M${pts[0][0]},${pts[0][1]}`;
+    for (let i = 1; i < pts.length; i++) { const [x0, y0] = pts[i - 1], [x1, y1] = pts[i], cx = (x0 + x1) / 2; d += ` C${cx},${y0} ${cx},${y1} ${x1},${y1}`; }
+    svg.append(s('path', { d: `${d} L${pts[pts.length - 1][0]},${H - B} L${pts[0][0]},${H - B} Z`, fill: `url(#${id})`, class: 'ar' }));
+    svg.append(s('path', { d, class: 'ln', fill: 'none' }));
+    rows.forEach((r, i) => {
+      svg.append(s('circle', { class: 'hit', cx: pts[i][0], cy: pts[i][1], r: 14 }, s('title', {}, `${r.day}: ${fmt(r[key])}`)),
+        s('circle', { class: rows.length < 3 ? 'dotp show' : 'dotp', cx: pts[i][0], cy: pts[i][1], r: 4.5 }));
+      if (rows.length <= 10 || i % Math.ceil(rows.length / 8) === 0) svg.append(s('text', { x: pts[i][0], y: H - 8, 'text-anchor': 'middle' }, r.day.slice(5)));
+    });
+    return svg;
+  }
+
+  function colChart(rows, key, label, xl) {
+    const W = 640, H = 170, L = 34, B = 24, T = 8;
+    const max = Math.max(1, ...rows.map((r) => r[key] || 0));
+    const bw = (W - L) / rows.length;
+    const svg = s('svg', { class: 'chart', viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': label });
+    svg.append(s('line', { class: 'gl', x1: L, x2: W, y1: H - B, y2: H - B }), s('text', { x: L - 6, y: T + 6, 'text-anchor': 'end' }, fmt(max)));
+    rows.forEach((r, i) => {
+      const bh = Math.round(((r[key] || 0) / max) * (H - B - T));
+      svg.append(s('rect', { class: 'cb', x: L + i * bw + 2, y: H - B - bh, width: Math.max(2, bw - 4), height: Math.max(bh, r[key] ? 2 : 0), rx: 3 }, s('title', {}, `${xl(r)}: ${fmt(r[key])}`)));
+      if (i % 3 === 0) svg.append(s('text', { x: L + i * bw + bw / 2, y: H - 7, 'text-anchor': 'middle' }, xl(r)));
+    });
+    return svg;
+  }
+
+  function siteBars(sites) {
+    if (!sites.length) return h('div', { class: 'empty' }, 'No websites yet.');
+    const max = Math.max(1, ...sites.map((r) => r.visits));
+    return h('div', { class: 'bars' }, sites.map((r) => {
+      const fill = h('i');
+      fill.style.width = `${Math.max(3, Math.round((r.visits / max) * 100))}%`;
+      return h('div', { class: 'bar' }, h('div', { class: `av sq ${tone(r.domain)}` }, r.domain[0].toUpperCase()),
+        h('div', { class: 'meta' }, siteLink(r.domain), h('div', { class: 'track' }, fill)),
+        h('div', { class: 'val' }, `${fmt(r.visits)} visits`, h('small', {}, `${dur(r.totalMs)} · ${fmt(r.users)} user${r.users === 1 ? '' : 's'}`)));
+    }));
+  }
+
+  // ---------- widgets ----------
+  function table(cols, rows, onRow) {
+    return h('table', {},
+      h('thead', {}, h('tr', {}, cols.map((c) => h('th', { class: c.num ? 'num' : '' }, c.label)))),
+      h('tbody', {}, rows.length ? rows.map((r) => h('tr', onRow ? { class: 'click', onclick: () => onRow(r) } : {},
+        cols.map((c) => h('td', { class: (c.num ? 'num ' : '') + (c.cls || ''), 'data-label': c.label || '' }, c.cell(r))))) : h('tr', {}, h('td', { colspan: cols.length, class: 'empty' }, 'Nothing to show.'))));
+  }
+  const kpi = (v, l, icon, t = '') => h('div', { class: `kpi ${t}` }, h('div', { class: 'badge' }, ico(icon)), h('b', {}, v), h('span', {}, l));
+  const pager = (page, total, limit, go) => h('div', { class: 'pager' },
+    h('span', { class: 'mut' }, `${fmt(total)} total`),
+    h('button', { disabled: page <= 1, onclick: () => go(page - 1) }, 'Prev'), h('span', {}, `Page ${page}`),
+    h('button', { disabled: page * limit >= total, onclick: () => go(page + 1) }, 'Next'));
+  const card = (title, hint, ...body) => h('div', { class: 'card' }, h('h2', {}, title), hint ? h('p', { class: 'hint' }, hint) : h('div', { class: 'hint' }), body);
+  const searchBox = (placeholder, on) => h('div', { class: 'search' }, ico('search'), h('input', { placeholder, oninput: (e) => on(e.target.value) }));
+
+  // ---------- views ----------
+  async function viewOverview(box) {
+    const load = async () => {
+      box.replaceChildren(loading());
+      try {
+        const d = await api(`/overview?${range()}`);
+        box.replaceChildren(
+          h('div', { class: 'grid' },
+            kpi(fmt(d.users.total), 'Registered users', 'users'), kpi(fmt(d.totals.activeUsers), `Active users, ${rangeLabel()}`, 'activity', 't-ok'),
+            kpi(fmt(d.totals.visits), 'Page visits', 'globe', 't-cyan'), kpi(fmt(d.totals.domains), 'Websites visited', 'layers', 't-violet'),
+            kpi(dur(d.totals.totalMs), 'Total browsing time', 'clock', 't-warn'), kpi(dur(d.sessions.avgMs), 'Avg session duration', 'clock', 't-ok'),
+            kpi(fmt(d.sessions.n), 'Sessions', 'list', 't-cyan'), kpi(fmt(d.users.newUsers), 'New users', 'userplus', 't-violet')),
+          h('div', { class: 'cols' },
+            card('Visits per day', 'Pages opened across all users', areaChart(d.daily, 'visits', 'Visits per day')),
+            card('Active users per day', 'Distinct people browsing', areaChart(d.daily, 'users', 'Active users per day', 'cy'))),
+          h('div', { class: 'cols' },
+            card('Top websites', 'Most visited in this period', siteBars(d.topSites)),
+            h('div', {}, card('Activity by hour', 'When people browse (your local time)', colChart(d.hourly, 'visits', 'Visits by hour', (r) => `${r.hour}h`)),
+              card('Recently active', null, d.recentUsers.length ? h('div', { class: 'bars' }, d.recentUsers.map((u) => h('div', { class: 'who' },
+                avatar(u.name), h('div', {}, h('b', {}, u.name), h('span', { class: 'sub' }, `${u.code || ''}`)),
+                h('span', { class: 'pill ' + (online(u.last_seen) ? 'ok' : '') }, online(u.last_seen) ? 'online' : ago(u.last_seen))))) : h('div', { class: 'empty' }, 'No users yet.')))));
+      } catch (e) { box.replaceChildren(errBox(e)); }
+    };
+    return [dateBar(load), box, load];
+  }
+
+  async function viewWebsites(box) {
+    let q = '', sort = 'visits';
+    const load = async () => {
+      try {
+        const d = await api(`/websites?${range()}&q=${encodeURIComponent(q)}&sort=${sort}&limit=200`);
+        box.replaceChildren(h('div', { class: 'card' }, table([
+          { label: 'Website', cell: (r) => h('div', { class: 'who' }, h('div', { class: `av sq ${tone(r.domain)}` }, r.domain[0].toUpperCase()), siteLink(r.domain)) },
+          { label: 'Visits', num: 1, cell: (r) => fmt(r.visits) }, { label: 'Users', num: 1, cell: (r) => fmt(r.users) },
+          { label: 'Total time', num: 1, cell: (r) => dur(r.totalMs) }, { label: 'Avg / visit', num: 1, cell: (r) => dur(r.avgMs) },
+          { label: 'Last visit', cell: (r) => ago(r.lastVisit) }], d.rows, (r) => { location.hash = '#/websites/' + encodeURIComponent(r.domain); })));
+      } catch (e) { box.replaceChildren(errBox(e)); }
+    };
+    const sorter = h('div', { class: 'seg' }, [['visits', 'Most visits'], ['time', 'Most time']].map(([v, l]) =>
+      h('button', { class: v === sort ? 'on' : '', onclick: (e) => { sort = v; sorter.querySelectorAll('button').forEach((b) => b.classList.remove('on')); e.target.classList.add('on'); load(); } }, l)));
+    return [h('div', {}, dateBar(load), h('div', { class: 'row mb' }, searchBox('Filter websites…', (v) => { q = v; load(); }), sorter)), box, load];
+  }
+
+  async function viewSessions(box) {
+    const load = async () => {
+      try {
+        const d = await api(`/sessions?${range()}`);
+        box.replaceChildren(card('Sessions per day', 'Each time someone opens the browser', areaChart(d.daily, 'sessions', 'Sessions per day')),
+          h('div', { class: 'card' }, table([{ label: 'Day', cell: (r) => r.day }, { label: 'Sessions', num: 1, cell: (r) => fmt(r.sessions) },
+            { label: 'Avg duration', num: 1, cell: (r) => dur(r.avgMs) }, { label: 'Total time', num: 1, cell: (r) => dur(r.totalMs) }], d.daily.slice().reverse())));
+      } catch (e) { box.replaceChildren(errBox(e)); }
+    };
+    return [dateBar(load), box, load];
+  }
+
+  async function viewUsers(box) {
+    let q = '', page = 1;
+    const load = async () => {
+      try {
+        const d = await api(`/users?${range()}&q=${encodeURIComponent(q)}&page=${page}&limit=25`);
+        box.replaceChildren(h('div', { class: 'card' }, table([
+          { label: 'User', cell: (r) => h('div', { class: 'who' }, avatar(r.name), h('div', {}, h('b', {}, r.name), h('span', { class: 'sub' }, r.email || r.google_name || r.code || r.id))) },
+          { label: 'User ID', cell: (r) => r.code || r.id },
+          { label: 'Last seen', cell: (r) => h('span', {}, h('i', { class: 'dot ' + (online(r.last_seen) ? 'on' : '') }), ago(r.last_seen)) },
+          { label: 'Visits', num: 1, cell: (r) => fmt(r.visits) }, { label: 'Browsing', num: 1, cell: (r) => dur(r.totalMs) }, { label: 'Sessions', num: 1, cell: (r) => dur(r.sessionMs) },
+          { label: 'Status', cell: (r) => h('span', { class: 'pill ' + (r.status === 'active' ? 'ok' : 'warn') }, r.status === 'active' ? 'Active' : 'Suspended') }],
+          d.rows, (r) => { location.hash = '#/users/' + r.id; }), pager(page, d.total, 25, (p) => { page = p; load(); })));
+      } catch (e) { box.replaceChildren(errBox(e)); }
+    };
+    return [h('div', {}, dateBar(load), h('div', { class: 'row mb' }, searchBox('Search name, ID or email…', (v) => { q = v; page = 1; load(); }))), box, load];
+  }
+
+  async function viewUser(box, id) {
+    let tab = 'history', q = '', page = 1;
+    const head = h('div', {}), body = h('div', {});
+    const loadHead = async () => {
+      try {
+        const d = await api(`/users/${encodeURIComponent(id)}?${range()}`);
+        const u = d.user;
+        const actions = h('div', { class: 'actions' });
+        if (can('manage_users')) {
+          actions.append(
+            btn('pause', u.status === 'active' ? 'Suspend uploads' : 'Reactivate', { onclick: async () => { await api(`/users/${id}`, { method: 'PATCH', body: { status: u.status === 'active' ? 'suspended' : 'active' } }); loadHead(); } }),
+            btn('trash', 'Erase user', { class: 'bad', onclick: async () => { if (confirm(`Permanently erase ${u.name} and all their data?`)) { await api(`/users/${id}`, { method: 'DELETE' }); location.hash = '#/users'; } } }));
+        }
+        if (can('delete_data')) {
+          const wipe = (what, path, msg) => btn('trash', `Clear ${what}`, { class: 'bad', onclick: async () => {
+            if (!confirm(msg)) return;
+            try { const r = await api(path, { method: 'DELETE' }); alert(`Deleted ${r.deleted} ${what}.`); loadHead(); loadBody(); } catch (er) { alert(er.message); }
+          } });
+          actions.append(wipe('history', `/users/${encodeURIComponent(id)}/history`, `Delete ALL browsing history and sessions of ${u.name}?`),
+            wipe('searches', `/users/${encodeURIComponent(id)}/searches`, `Delete ALL search queries of ${u.name}?`));
+        }
+        if (can('export')) actions.append(btn('download', 'Export CSV', { onclick: async () => { try { await csvDownload(id, range()); } catch (er) { alert(er.message); } } }));
+        head.replaceChildren(
+          h('div', { class: 'card' }, h('div', { class: 'hero' }, avatar(u.name, 'lg'),
+            h('div', { class: 'info' }, h('h2', {}, u.name), h('div', { class: 'sub' }, `${u.code || u.id}${u.email ? ' · ' + u.email : ''}`),
+              h('div', { class: 'chips' },
+                h('span', { class: 'pill ' + (online(u.last_seen) ? 'ok' : '') }, online(u.last_seen) ? 'Online now' : `Seen ${ago(u.last_seen)}`),
+                h('span', { class: 'pill' }, `Registered ${dt(u.created_at)}`),
+                h('span', { class: 'pill' }, `${u.manufacturer ? u.manufacturer + ' ' : ''}${u.device_model || 'Unknown device'} · Android ${u.os_version || '?'}${u.sdk ? ' (API ' + u.sdk + ')' : ''} · app ${u.app_version || '?'}`),
+                u.locale ? h('span', { class: 'pill' }, `${u.locale}${u.timezone ? ' · ' + u.timezone : ''}`) : null,
+                u.name_source ? h('span', { class: 'pill' }, 'Name from: ' + ({ typed: 'typed by user', 'device-name': 'phone name', google: 'Google account', guest: 'auto (guest)' }[u.name_source] || u.name_source)) : null,
+                h('span', { class: 'pill ' + (u.activity_consent ? 'ok' : 'bad') }, u.activity_consent ? 'Activity sharing on' : 'Activity sharing off'),
+                h('span', { class: 'pill ' + (u.search_consent ? 'ok' : '') }, u.search_consent ? 'Search sharing on' : 'Search sharing off'),
+                u.status !== 'active' ? h('span', { class: 'pill warn' }, 'Suspended') : null))), actions),
+          h('div', { class: 'grid' }, kpi(fmt(d.stats.visits), 'Visits', 'globe', 't-cyan'), kpi(fmt(d.stats.domains), 'Websites', 'layers', 't-violet'), kpi(dur(d.stats.totalMs), 'Browsing time', 'clock', 't-warn'),
+            kpi(fmt(d.sessions.n), 'Sessions', 'list'), kpi(dur(d.sessions.avgMs), 'Avg session', 'clock', 't-ok')),
+          h('div', { class: 'cols' }, card('Visits per day', null, areaChart(d.daily, 'visits', 'Visits per day')),
+            card('Top sites', 'By visits', siteBars(d.topSites.map((t) => ({ ...t, users: 1 }))))));
+      } catch (e) { head.replaceChildren(errBox(e)); }
+    };
+    const loadBody = async () => {
+      try {
+        const base = `/users/${encodeURIComponent(id)}`;
+        if (tab === 'history') {
+          const d = await api(`${base}/history?${range()}&q=${encodeURIComponent(q)}&page=${page}&limit=50`);
+          body.replaceChildren(h('div', { class: 'card' }, table([
+            { label: 'When', cell: (r) => dt(r.visited_at) },
+            { label: 'Page', cls: 'url', cell: (r) => h('div', { class: 'who' }, h('div', { class: `av sq ${tone(r.domain)}` }, r.domain[0].toUpperCase()), h('div', {}, extLink(r.url, r.title || r.domain), h('div', { class: 'sub' }, r.url))) },
+            { label: 'Time spent', num: 1, cell: (r) => dur(r.duration_ms) },
+            ...(can('delete_data') ? [{ label: '', cell: (r) => btn('trash', 'Delete', { class: 'bad', title: 'Delete this entry', onclick: async () => {
+              if (!confirm('Delete this history entry?')) return;
+              try { await api(`${base}/history/${encodeURIComponent(r.id)}`, { method: 'DELETE' }); loadBody(); loadHead(); } catch (er) { alert(er.message); }
+            } }) }] : [])], d.rows), pager(page, d.total, 50, (p) => { page = p; loadBody(); })));
+        } else if (tab === 'sessions') {
+          const d = await api(`${base}/sessions?${range()}&limit=100`);
+          body.replaceChildren(h('div', { class: 'card' }, table([{ label: 'Started', cell: (r) => dt(r.started_at) }, { label: 'Ended', cell: (r) => dt(r.ended_at) }, { label: 'Duration', num: 1, cell: (r) => dur(r.duration_ms) }], d.rows)));
+        } else {
+          const d = await api(`${base}/searches?${range()}&limit=100`);
+          body.replaceChildren(h('div', { class: 'card' }, d.consent ? null : h('p', { class: 'hint' }, 'This user has not enabled search-query sharing.'),
+            table([{ label: 'When', cell: (r) => dt(r.searched_at) },
+              { label: 'Query', cell: (r) => extLink('https://www.google.com/search?q=' + encodeURIComponent(r.query), r.query) },
+              { label: 'Engine', cell: (r) => r.engine || '' },
+              ...(can('delete_data') ? [{ label: '', cell: (r) => btn('trash', 'Delete', { class: 'bad', title: 'Delete this search', onclick: async () => {
+                if (!confirm('Delete this search query?')) return;
+                try { await api(`${base}/searches/${encodeURIComponent(r.id)}`, { method: 'DELETE' }); loadBody(); } catch (er) { alert(er.message); }
+              } }) }] : [])], d.rows)));
+        }
+      } catch (e) { body.replaceChildren(errBox(e)); }
+    };
+    const reload = () => { page = 1; loadHead(); loadBody(); };
+    const tabs = h('div', { class: 'seg' }, ['history', 'sessions', 'searches'].map((t) =>
+      h('button', { class: t === tab ? 'on' : '', onclick: (e) => { tab = t; tabs.querySelectorAll('button').forEach((b) => b.classList.remove('on')); e.target.classList.add('on'); page = 1; loadBody(); } }, t[0].toUpperCase() + t.slice(1))));
+    box.replaceChildren(head, h('div', { class: 'row mb' }, tabs, searchBox('Filter history by URL or title…', (v) => { q = v; page = 1; if (tab === 'history') loadBody(); })), body);
+    return [dateBar(reload), box, reload, true];
+  }
+
+  async function viewAdmins(box) {
+    const load = async () => {
+      try {
+        const d = await api('/admins');
+        box.replaceChildren(
+          h('div', { class: 'card' }, table([{ label: 'Admin', cell: (r) => h('div', { class: 'who' }, avatar(r.name || r.email), h('div', {}, h('b', {}, r.name), h('span', { class: 'sub' }, r.email))) },
+            { label: 'Role', cell: (r) => h('span', { class: 'pill ' + (r.role === 'superadmin' ? 'ok' : '') }, r.role) }, { label: 'Updated', cell: (r) => dt(r.created_at) },
+            { label: 'Protected', cell: () => h('span', { class: 'pill ok' }, ico('lock'), 'Cannot be deleted here') }], d.rows)),
+          card('Add or change admins', 'Roles are Firebase sign-in claims, so they are managed from your PC with the Admin SDK, never from a browser:',
+            h('p', {}, h('code', {}, 'node scripts/set-role.js person@example.com analyst "Name"')),
+            h('p', { class: 'mut' }, 'Roles: superadmin (everything, can delete) and analyst (read-only). Use "none" to remove access. The person must sign in again.')));
+      } catch (e) { box.replaceChildren(errBox(e)); }
+    };
+    return [h('div', {}), box, load];
+  }
+
+  async function viewServer(box) {
+    const load = async () => {
+      try {
+        const d = await api('/server-info');
+        const row = (k, v) => h('tr', {}, h('th', {}, k), h('td', {}, v));
+        const danger = (scope, label) => btn('trash', `Clear ${label}`, { class: 'bad', onclick: async (e) => {
+          const w = prompt(`This permanently deletes ${label} for ALL users. Type DELETE to confirm:`);
+          if (w !== 'DELETE') return;
+          e.currentTarget.disabled = true;
+          try { const r = await api('/data', { method: 'DELETE', body: { scope, confirm: 'DELETE' } }); alert('Deleted: ' + JSON.stringify(r.deleted)); } catch (er) { alert(er.message); }
+          load();
+        } });
+        box.replaceChildren(
+          h('div', { class: 'grid' }, kpi(fmt(d.counts.users), 'Users', 'users'), kpi(fmt(d.counts.visits), 'Visits', 'globe', 't-cyan'), kpi(fmt(d.counts.searches), 'Searches', 'search', 't-violet'),
+            kpi(fmt(d.counts.sessions), 'Sessions', 'list', 't-warn'), kpi(fmt(d.counts.admins), 'Admins', 'shield', 't-ok')),
+          card('Where data is stored', null, h('table', {}, h('tbody', {},
+            row('Database', 'Google Firebase: Cloud Firestore'), row('Project', d.projectId), row('Admin site', d.host),
+            row('Public pages', h('span', {}, extLink(d.host + '/privacy', 'Privacy policy'), ' · ', extLink(d.host + '/terms', 'Terms of service'))),
+            row('Access control', 'Firestore security rules + Firebase Authentication roles')))),
+          can('delete_data') ? card('Danger zone: all users', 'User accounts stay registered; only collected data is removed. Actions are audit-logged.',
+            h('div', { class: 'row' }, danger('history', 'browsing history + sessions'), danger('searches', 'search queries'), danger('all', 'ALL collected data'))) : null);
+      } catch (e) { box.replaceChildren(errBox(e)); }
+    };
+    return [h('div', {}), box, load];
+  }
+
+  async function viewAudit(box) {
+    const load = async () => {
+      try {
+        const d = await api('/audit?limit=200');
+        box.replaceChildren(h('div', { class: 'card' }, table([{ label: 'When', cell: (r) => dt(r.at) }, { label: 'Admin', cell: (r) => r.admin_email || '—' },
+          { label: 'Action', cell: (r) => h('span', { class: 'pill ' + (/delete|erase|clear/.test(r.action) ? 'bad' : '') }, r.action) }, { label: 'Target', cell: (r) => r.target || '' }, { label: 'Detail', cell: (r) => r.detail || '' }], d.rows)));
+      } catch (e) { box.replaceChildren(errBox(e)); }
+    };
+    return [h('div', {}), box, load];
+  }
+
+  async function viewAccount(box) {
+    const form = h('form', { class: 'card', onsubmit: async (e) => {
+      e.preventDefault(); const f = e.target;
+      try { await api('/auth/change-password', { method: 'POST', body: { current: f.current.value, next: f.next.value } }); f.reset(); alert('Password changed.'); }
+      catch (er) { alert('Failed: ' + er.message + ' (new password needs 12+ characters)'); }
+    } }, h('h2', {}, 'Change password'), h('p', { class: 'hint' }, `Signed in as ${me.email} (${me.role}).`),
+      h('div', { class: 'row' }, h('input', { name: 'current', type: 'password', placeholder: 'Current password', autocomplete: 'current-password', required: true }),
+        h('input', { name: 'next', type: 'password', placeholder: 'New password (12+ chars)', autocomplete: 'new-password', required: true }), h('button', { class: 'pri' }, 'Update password')));
+    box.replaceChildren(form);
+    return [h('div', {}), box, null];
+  }
+
+
+  async function viewSite(box, domain) {
+    let tab = 'pages';
+    const body = h('div', {}), head = h('div', {});
+    let d;
+    const draw = () => {
+      if (!d) return;
+      if (tab === 'pages') body.replaceChildren(h('div', { class: 'card' }, h('p', { class: 'hint' }, 'Every different page opened on this website, most visited first.'), table([
+        { label: 'Page', cls: 'url', cell: (r) => h('div', {}, extLink(r.url, r.title || r.url), h('div', { class: 'sub' }, r.url)) },
+        { label: 'Visits', num: 1, cell: (r) => fmt(r.visits) }, { label: 'Users', num: 1, cell: (r) => fmt(r.users) },
+        { label: 'Time', num: 1, cell: (r) => dur(r.totalMs) }, { label: 'Last opened', cell: (r) => ago(r.lastVisit) }], d.pages)));
+      else if (tab === 'timeline') body.replaceChildren(h('div', { class: 'card' }, h('p', { class: 'hint' }, 'Everything opened on this website, newest first (up to 1,000).'), table([
+        { label: 'When', cell: (r) => dt(r.visited_at) },
+        { label: 'Page', cls: 'url', cell: (r) => h('div', {}, extLink(r.url, r.title || r.url), h('div', { class: 'sub' }, r.url)) },
+        { label: 'User', cell: (r) => h('a', { href: '#/users/' + r.uid }, r.user) },
+        { label: 'Time spent', num: 1, cell: (r) => dur(r.duration_ms) }], d.timeline)));
+      else body.replaceChildren(h('div', { class: 'card' }, table([
+        { label: 'User', cell: (r) => h('div', { class: 'who' }, avatar(r.name), h('a', { href: '#/users/' + r.uid }, r.name)) },
+        { label: 'Visits', num: 1, cell: (r) => fmt(r.visits) }, { label: 'Time', num: 1, cell: (r) => dur(r.totalMs) }, { label: 'Last visit', cell: (r) => ago(r.lastVisit) }], d.byUser)));
+    };
+    const load = async () => {
+      try {
+        d = await api('/websites/' + encodeURIComponent(domain) + '?' + range());
+        head.replaceChildren(h('div', { class: 'card' }, h('div', { class: 'hero' }, h('div', { class: 'av lg sq ' + tone(domain) }, domain[0].toUpperCase()),
+          h('div', { class: 'info' }, h('h2', {}, domain), h('div', { class: 'chips' }, extLink('https://' + domain, 'Open ' + domain + ' \u2197'))))),
+        h('div', { class: 'grid' }, kpi(fmt(d.totals.visits), 'Visits', 'globe', 't-cyan'), kpi(fmt(d.totals.pages), 'Different pages', 'list', 't-violet'),
+          kpi(fmt(d.totals.users), 'Users', 'users'), kpi(dur(d.totals.totalMs), 'Time spent', 'clock', 't-warn')));
+        draw();
+      } catch (e) { body.replaceChildren(errBox(e)); }
+    };
+    const tabs = h('div', { class: 'seg' }, [['pages', 'Pages'], ['timeline', 'Timeline'], ['users', 'Users']].map(([v, l]) =>
+      h('button', { class: v === tab ? 'on' : '', onclick: (e) => { tab = v; tabs.querySelectorAll('button').forEach((b) => b.classList.remove('on')); e.target.classList.add('on'); draw(); } }, l)));
+    box.replaceChildren(head, h('div', { class: 'row mb' }, tabs), body);
+    return [dateBar(load), box, load];
+  }
+
+  async function viewSettings(box) {
+    const seg = (key, options, onSet) => h('div', { class: 'seg' }, options.map(([v, l]) => h('button', { class: prefs.get(key, options[0][0]) === v ? 'on' : '', onclick: (e) => {
+      prefs.set(key, v); e.currentTarget.parentNode.querySelectorAll('button').forEach((b) => b.classList.remove('on')); e.currentTarget.classList.add('on'); if (onSet) onSet(v);
+    } }, l)));
+    const setting = (title, hint, control) => h('div', { class: 'setting' }, h('div', {}, h('b', {}, title), h('div', { class: 'sub' }, hint)), control);
+    const link = (href, icon, title, hint) => h('a', { class: 'listrow', href }, h('div', { class: 'badge' }, ico(icon)), h('div', {}, h('b', {}, title), h('div', { class: 'sub' }, hint)), h('span', { class: 'go' }, ico('chev')));
+    box.replaceChildren(
+      card('Appearance and behaviour', null,
+        setting('Theme', 'Match your device or force light or dark', seg('theme', [['auto', 'Auto'], ['light', 'Light'], ['dark', 'Dark']], applyTheme)),
+        setting('Default date range', 'Used when you open the console', seg('range', [['7', '7 days'], ['30', '30 days'], ['90', '90 days']], (v) => { filter.preset = v; })),
+        setting('Auto refresh', 'Reload the current page automatically', seg('auto', [['0', 'Off'], ['30', '30 s'], ['60', '60 s']], () => scheduleRefresh()))),
+      (can('manage_config') || can('manage_admins') || can('audit') || can('server_info'))
+        ? h('div', { class: 'card list' }, h('h2', {}, 'Manage'), h('div', { class: 'hint' }, 'Control the phone app and see who has access.'),
+            can('manage_config') ? link('#/config', 'gear', 'Firebase settings', 'Remote app settings and data retention') : null,
+            can('manage_admins') ? link('#/admins', 'shield', 'Admins', 'Who can open this console') : null,
+            can('audit') ? link('#/audit', 'list', 'Audit log', 'Every sensitive action by an admin') : null,
+            can('server_info') ? link('#/server', 'db', 'Data and storage', 'Records stored, clear data') : null)
+        : null,
+      h('div', { class: 'card list' }, h('h2', {}, 'Account'), h('div', { class: 'hint' }),
+        link('#/account', 'user', 'My account', 'Change your password')),
+      card('Session', null, h('p', {}, h('b', {}, me.name || me.email), ' ', h('span', { class: 'pill' }, me.role)), h('div', { class: 'row' },
+        btn('out', 'Sign out', { class: 'bad', onclick: async () => { await api('/auth/logout', { method: 'POST' }); me = null; render(); } }))));
+    return [h('div', {}), box, null];
+  }
+
+
+  async function viewConfig(box) {
+    const load = async () => {
+      try {
+        const c = await api('/config');
+        const st = { ...c };
+        const onoff = (val, set) => { const w = h('div', { class: 'seg' }); const mk = (v, l) => h('button', { type: 'button', class: val === v ? 'on' : '', onclick: (e) => { val = v; w.querySelectorAll('button').forEach((b) => b.classList.remove('on')); e.currentTarget.classList.add('on'); set(v); } }, l); w.append(mk(true, 'On'), mk(false, 'Off')); return w; };
+        const num = (k, min, max) => h('input', { type: 'number', min, max, value: st[k], oninput: (e) => { st[k] = e.target.value; } });
+        const row = (title, hint, control) => h('div', { class: 'setting' }, h('div', {}, h('b', {}, title), h('div', { class: 'sub' }, hint)), control);
+        const ann = h('input', { type: 'text', maxlength: 200, value: st.announcement, placeholder: 'Shown inside the phone app (optional)', oninput: (e) => { st.announcement = e.target.value; } });
+        const save = btn('check', 'Save settings', { class: 'pri', onclick: async (e) => { e.currentTarget.disabled = true; try { await api('/config', { method: 'PUT', body: st }); alert('Saved. Phones pick this up at their next sync.'); } catch (er) { alert(er.message); } load(); } });
+        box.replaceChildren(
+          card('Remote app settings', 'Saved in Firebase. Every phone reads these at its next sync, and the security rules enforce the first two switches even if an app ignored them.',
+            row('Collect browsing activity', 'Off = every phone stops uploading immediately (kill switch)', onoff(st.trackingEnabled, (v) => { st.trackingEnabled = v; })),
+            row('Allow search-query collection', 'Off = search queries are blocked for everyone', onoff(st.searchAllowed, (v) => { st.searchAllowed = v; })),
+            row('Upload interval (seconds)', 'How quickly phones push new activity (5 to 600)', num('uploadIntervalSeconds', 5, 600)),
+            row('Retention (days)', 'Used by "Delete old data" below (1 to 3650)', num('retentionDays', 1, 3650)),
+            row('Announcement', 'A short message shown inside the phone app', ann),
+            h('div', { class: 'row' }, save), c.updatedAt ? h('p', { class: 'hint' }, `Last changed ${dt(c.updatedAt)} by ${c.updatedBy}`) : null),
+          card('Delete old data', 'Permanently deletes visits, sessions and searches older than the retention period for every user.',
+            h('div', { class: 'row' }, btn('trash', 'Delete data older than the retention period', { class: 'bad', onclick: async (e) => {
+              const d = parseInt(st.retentionDays, 10) || 180;
+              if (prompt(`Delete everything older than ${d} days for ALL users? Type DELETE to confirm:`) !== 'DELETE') return;
+              e.currentTarget.disabled = true;
+              try { const r = await api('/purge', { method: 'POST', body: { days: d } }); alert('Deleted: ' + JSON.stringify(r.deleted)); } catch (er) { alert(er.message); }
+              load();
+            } }))),
+          card('Accounts and deletion', null,
+            h('p', {}, 'Admin (superadmin) accounts can never be erased from this console; the security rules refuse it.'),
+            h('p', {}, 'Erasing a user, or clearing history or searches, deletes the records from Firebase immediately. When an erased user next opens the app, it also removes that person\u2019s Firebase sign-in, so nothing is left behind.')));
+      } catch (e) { box.replaceChildren(errBox(e)); }
+    };
+    return [h('div', {}), box, load];
+  }
+
+  // ---------- shell / routing ----------
+  const routes = [
+    ['#/', 'Overview', 'Browsing activity across all users', 'grid', viewOverview, 'aggregate', 'Analytics'],
+    ['#/websites', 'Websites', 'Tap a website to see every page opened on it', 'globe', viewWebsites, 'aggregate', 'Analytics'],
+    ['#/sessions', 'Sessions', 'How often and how long the browser is used', 'clock', viewSessions, 'aggregate', 'Analytics'],
+    ['#/users', 'Users', 'Everyone who installed the app', 'users', viewUsers, 'user_list', 'People'],
+    ['#/config', 'Firebase settings', 'Control the phone app remotely and manage retention', 'db', viewConfig, 'manage_config', 'Manage'],
+    ['#/admins', 'Admins', 'Who can open this console', 'shield', viewAdmins, 'manage_admins', 'Manage'],
+    ['#/audit', 'Audit log', 'Every sensitive action taken by an admin', 'list', viewAudit, 'audit', 'Manage'],
+    ['#/server', 'Data and storage', 'What is stored and where', 'db', viewServer, 'server_info', 'Manage'],
+    ['#/account', 'My account', 'Your sign-in details', 'user', viewAccount, 'aggregate', 'Account'],
+    ['#/settings', 'Settings', 'Appearance, refresh and more', 'gear', viewSettings, 'aggregate', 'Account'],
+  ];
+  // bottom bar on phones: main areas + Settings (which lists the rest)
+  const TABS = [['#/', 'Overview', 'grid'], ['#/websites', 'Websites', 'globe'], ['#/sessions', 'Sessions', 'clock'], ['#/users', 'Users', 'users'], ['#/settings', 'Settings', 'gear']];
+  const SETTINGS_GROUP = ['#/settings', '#/admins', '#/server', '#/audit', '#/account', '#/config'];
+
+  function loginView(msg) {
+    const f = h('form', { onsubmit: async (e) => {
+      e.preventDefault();
+      try { await api('/auth/login', { method: 'POST', body: { email: f.email.value, password: f.password.value } }); await boot(); }
+      catch (er) { render(({ invalid_credentials: 'Invalid email or password.', forbidden: 'This account is not an administrator.', too_many_attempts: 'Too many attempts. Try again later.' })[er.message] || er.message); }
+    } }, h('h1', {}, 'Welcome back'), h('p', { class: 'subtitle' }, 'Sign in to the WBrowser admin console.'),
+      h('div', {}, h('label', {}, 'Email'), h('input', { name: 'email', type: 'email', placeholder: 'you@company.com', autocomplete: 'username', required: true })),
+      h('div', {}, h('label', {}, 'Password'), h('input', { name: 'password', type: 'password', placeholder: '••••••••••••', autocomplete: 'current-password', required: true })),
+      msg ? h('div', { class: 'err' }, msg) : null, h('button', { class: 'pri' }, 'Sign in'),
+      h('button', { type: 'button', class: 'link', onclick: async (e) => {
+        const email = f.email.value.trim();
+        if (!email) { f.email.focus(); alert('Type your admin email first, then tap "Forgot password?".'); return; }
+        e.currentTarget.disabled = true;
+        try { await api('/auth/reset', { method: 'POST', body: { email } }); alert('If that email belongs to an admin, a password reset link has been sent to it. Check your inbox (and spam).'); }
+        catch (er) { alert(er.message === 'too_many_attempts' ? 'Too many requests. Try again later.' : er.message); }
+        e.currentTarget.disabled = false;
+      } }, 'Forgot password?'),
+      h('p', { class: 'notice' }, 'Access is limited to authorised administrators. Activity is logged.'));
+    return h('div', { class: 'auth' },
+      h('div', { class: 'art' }, h('div', { class: 'brand' }, h('div', { class: 'logo' }, ico('shield')), h('span', {}, 'WBrowser Admin')),
+        h('div', {}, h('h2', {}, 'Understand how your browser is used.'), h('p', {}, 'Live activity, website analytics and per-user history in one secure place.'),
+          h('ul', {}, ['Real-time user activity and session length', 'Role-based access with a full audit trail', 'Delete any user’s data at any time'].map((t) => h('li', {}, ico('check'), t)))),
+        h('p', { class: 'sub' }, '')),
+      h('div', { class: 'pane' }, f));
+  }
+
+  function scheduleRefresh() {
+    clearInterval(refreshTimer);
+    const sec = parseInt(prefs.get('auto', '0'), 10);
+    if (sec > 0) refreshTimer = setInterval(() => { if (me && currentLoad && !document.hidden) { refreshData(); currentLoad(); } }, sec * 1000);
+  }
+
+  async function render(msg) {
+    if (!me) { clearInterval(refreshTimer); root.replaceChildren(loginView(typeof msg === 'string' ? msg : '')); return; }
+    const hash = location.hash || '#/';
+    const uid = /^#\/users\/(.+)$/.exec(hash);
+    const site = /^#\/websites\/(.+)$/.exec(hash);
+    const route = uid ? ['#/users', 'User activity', 'Profile, history, sessions and searches', 'users', null, 'user_detail']
+      : site ? ['#/websites', 'Website activity', 'Every page opened on this website', 'globe', null, 'aggregate']
+      : (routes.find((r) => r[0] === hash) || routes[0]);
+    const groups = [...new Set(routes.filter((r) => can(r[5])).map((r) => r[6]))];
+    const nav = h('nav', {}, h('div', { class: 'brand' }, h('div', { class: 'logo' }, ico('shield')), h('span', {}, 'WBrowser Admin')),
+      groups.map((g) => [h('div', { class: 'navgroup' }, g), routes.filter((r) => r[6] === g && can(r[5])).map((r) =>
+        h('a', { class: 'item' + (r[0] === route[0] ? ' on' : ''), href: r[0], title: r[1] }, ico(r[3]), h('span', {}, r[1])))]),
+      h('div', { class: 'sp' }),
+      h('div', { class: 'me' }, avatar(me.name || me.email), h('div', {}, h('b', {}, me.name || me.email), h('span', {}, me.role)),
+        h('button', { class: 'out', title: 'Sign out', onclick: async () => { await api('/auth/logout', { method: 'POST' }); me = null; render(); } }, ico('out'))));
+    const tabbar = h('div', { class: 'tabbar' }, TABS.filter((t) => can(routes.find((r) => r[0] === t[0])[5])).map(([href, label, icon]) => {
+      const on = href === route[0] || (href === '#/settings' && SETTINGS_GROUP.includes(route[0]));
+      return h('a', { href, class: on ? 'on' : '' }, ico(icon), h('span', {}, label));
+    }));
+    const box = h('div', {});
+    const refreshBtn = btn('refresh', 'Refresh', { onclick: () => { refreshData(); if (currentLoad) currentLoad(); else render(); } });
+    const top = h('div', { class: 'top' }, h('div', {}, h('h1', {}, route[1]), h('p', { class: 'subtitle' }, route[2])), refreshBtn);
+    const main = h('main', {}, top);
+    root.replaceChildren(h('div', { class: 'shell' }, nav, main), tabbar);
+    currentLoad = null;
+    if (!can(route[5])) { main.append(h('p', { class: 'err' }, 'Not permitted.')); return; }
+    const [bar, content, load] = uid ? await viewUser(box, decodeURIComponent(uid[1]))
+      : site ? await viewSite(box, decodeURIComponent(site[1])) : await route[4](h('div', {}));
+    if (uid) { top.replaceChildren(h('div', {}, h('a', { href: '#/users' }, '\u2190 All users'), h('h1', {}, 'User activity'), h('p', { class: 'subtitle' }, route[2])), refreshBtn); main.append(bar, box); }
+    else if (site) { top.replaceChildren(h('div', {}, h('a', { href: '#/websites' }, '\u2190 All websites'), h('h1', {}, decodeURIComponent(site[1])), h('p', { class: 'subtitle' }, route[2])), refreshBtn); main.append(bar, box); }
+    else main.append(bar, content);
+    currentLoad = load || null; scheduleRefresh();
+    if (load) load();
+    window.scrollTo(0, 0);
+  }
+
+  async function boot() {
+    try { me = await initFirebase(); } catch { me = null; }
+    render(configured() ? '' : 'Firebase is not configured yet: paste your web config into firebase-config.js and redeploy.');
+  }
+  window.addEventListener('hashchange', () => { if (me) render(); });
+  boot();
+})();

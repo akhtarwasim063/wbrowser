@@ -1,0 +1,16 @@
+{
+  "manifest_version": 2,
+  "name": "WBrowser Shield",
+  "version": "1.0",
+  "description": "Extra YouTube ad shield for WBrowser.",
+  "browser_specific_settings": { "gecko": { "id": "wbshield@wbrowser.dev" } },
+  "permissions": ["*://*.youtube.com/*", "storage"],
+  "content_scripts": [
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["youtube.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ]
+}

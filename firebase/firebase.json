@@ -1,0 +1,17 @@
+{
+  "firestore": { "rules": "firestore.rules", "indexes": "firestore.indexes.json" },
+  "hosting": {
+    "public": "public",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "cleanUrls": true,
+    "redirects": [{ "source": "/", "destination": "/admin/", "type": 302 }],
+    "headers": [
+      { "source": "/admin/**", "headers": [
+        { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' https://www.gstatic.com; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com http://127.0.0.1:9099 http://127.0.0.1:8080 ws://127.0.0.1:8080; img-src 'self' data:; style-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "no-referrer" },
+        { "key": "Cache-Control", "value": "no-cache" } ] }
+    ]
+  },
+  "emulators": { "auth": { "port": 9099 }, "firestore": { "port": 8080 }, "hosting": { "port": 5000 }, "ui": { "enabled": false }, "singleProjectMode": true }
+}

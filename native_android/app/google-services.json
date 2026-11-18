@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "234164580335",
+    "project_id": "wbrowser-62d56",
+    "storage_bucket": "wbrowser-62d56.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:234164580335:android:4b0ed15c848d5f9f0e901a",
+        "android_client_info": {
+          "package_name": "dev.wbrowser.nativeapp"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "234164580335-cqc725oj3t6klm3ujupbqushb9vt6e0j.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "dev.wbrowser.nativeapp",
+            "certificate_hash": "800619761e8e511f02180713842f8e7cef5c0095"
+          }
+        },
+        {
+          "client_id": "234164580335-uc46v5dtkp4chqibb9e2vaji25jfsrmr.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD4ENaBxNa0v8W7gfKfpbWYaRckruPfcIY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "234164580335-uc46v5dtkp4chqibb9e2vaji25jfsrmr.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

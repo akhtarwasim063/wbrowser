@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.WBrowser" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/wb_primary</item>
+        <item name="colorOnPrimary">@color/wb_on_primary</item>
+        <item name="colorPrimaryContainer">@color/wb_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/wb_on_surface</item>
+        <item name="colorSurface">@color/wb_surface</item>
+        <item name="colorOnSurface">@color/wb_on_surface</item>
+        <item name="colorOnSurfaceVariant">@color/wb_on_variant</item>
+        <item name="colorSurfaceContainer">@color/wb_container</item>
+        <item name="colorSurfaceContainerLow">@color/wb_container</item>
+        <item name="colorSurfaceContainerHigh">@color/wb_container_high</item>
+        <item name="colorSurfaceContainerHighest">@color/wb_container_high</item>
+        <item name="colorOutline">@color/wb_outline</item>
+        <item name="colorOutlineVariant">@color/wb_outline</item>
+        <item name="android:colorBackground">@color/wb_bg</item>
+        <item name="android:windowBackground">@color/wb_bg</item>
+        <item name="preferenceTheme">@style/PreferenceThemeOverlay</item>
+    </style>
+    <style name="WB.Icon" parent="">
+        <item name="android:layout_width">40dp</item>
+        <item name="android:layout_height">40dp</item>
+        <item name="android:padding">9dp</item>
+        <item name="android:background">?attr/selectableItemBackgroundBorderless</item>
+        <item name="android:tint">?attr/colorOnSurfaceVariant</item>
+        <item name="android:scaleType">fitCenter</item>
+    </style>
+</resources>

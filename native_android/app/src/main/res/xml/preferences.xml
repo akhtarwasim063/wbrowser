@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory app:title="Appearance" app:iconSpaceReserved="false">
+        <ListPreference
+            app:defaultValue="system"
+            app:entries="@array/theme_entries"
+            app:entryValues="@array/theme_values"
+            app:iconSpaceReserved="false"
+            app:key="theme"
+            app:title="Theme"
+            app:useSimpleSummaryProvider="true" />
+        <ListPreference
+            app:defaultValue="100"
+            app:entries="@array/text_entries"
+            app:entryValues="@array/text_values"
+            app:iconSpaceReserved="false"
+            app:key="text_size"
+            app:title="Page text size"
+            app:useSimpleSummaryProvider="true" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Search" app:iconSpaceReserved="false">
+        <ListPreference
+            app:defaultValue="google"
+            app:entries="@array/search_entries"
+            app:entryValues="@array/search_values"
+            app:iconSpaceReserved="false"
+            app:key="search_engine"
+            app:title="Search engine"
+            app:useSimpleSummaryProvider="true" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Shields (ads, trackers, popups)" app:iconSpaceReserved="false">
+        <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:iconSpaceReserved="false"
+            app:key="shields_on"
+            app:summary="uBlock Origin + tracking protection. Blocks ads and promo pop-ups."
+            app:title="Block ads and trackers" />
+        <ListPreference
+            app:defaultValue="strict"
+            app:entries="@array/track_entries"
+            app:entryValues="@array/track_values"
+            app:iconSpaceReserved="false"
+            app:key="tracking_level"
+            app:title="Tracking protection"
+            app:useSimpleSummaryProvider="true" />
+        <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:iconSpaceReserved="false"
+            app:key="block_popups"
+            app:summary="Stops pages opening new tabs or windows you did not ask for."
+            app:title="Block pop-ups and unwanted new tabs" />
+        <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:iconSpaceReserved="false"
+            app:key="youtube_shield"
+            app:summary="Extra YouTube ad removal on top of uBlock Origin."
+            app:title="YouTube ad shield" />
+        <SwitchPreferenceCompat
+            app:defaultValue="false"
+            app:iconSpaceReserved="false"
+            app:key="block_notifications"
+            app:summary="Sites cannot ask to send you notifications."
+            app:title="Block site notifications" />
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="ubo_dashboard"
+            app:summary="Turn on more filter lists (annoyances, cookie notices)."
+            app:title="Advanced ad-block settings" />
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="ubo_status"
+            app:title="uBlock Origin" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Privacy and security" app:iconSpaceReserved="false">
+        <SwitchPreferenceCompat
+            app:defaultValue="false"
+            app:iconSpaceReserved="false"
+            app:key="https_only"
+            app:summary="Always use secure connections. Warns before loading http sites."
+            app:title="HTTPS-only mode" />
+        <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:iconSpaceReserved="false"
+            app:key="block_3p_cookies"
+            app:title="Block third-party cookies" />
+        <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:iconSpaceReserved="false"
+            app:key="safe_browsing"
+            app:summary="Warn about phishing and malware sites."
+            app:title="Safe browsing" />
+        <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:iconSpaceReserved="false"
+            app:key="gpc"
+            app:summary="Tell websites not to sell or share your data."
+            app:title="Global Privacy Control" />
+        <SwitchPreferenceCompat
+            app:defaultValue="false"
+            app:iconSpaceReserved="false"
+            app:key="clear_on_exit"
+            app:summary="Clears history, cookies and cache when the app is closed."
+            app:title="Clear browsing data on exit" />
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="clear_data"
+            app:title="Clear browsing data now" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Browsing" app:iconSpaceReserved="false">
+        <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:iconSpaceReserved="false"
+            app:key="javascript"
+            app:title="JavaScript" />
+        <SwitchPreferenceCompat
+            app:defaultValue="false"
+            app:iconSpaceReserved="false"
+            app:key="desktop_default"
+            app:title="Request desktop site by default" />
+        <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:iconSpaceReserved="false"
+            app:key="restore_tabs"
+            app:title="Restore tabs on start" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Account" app:iconSpaceReserved="false">
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="account"
+            app:summary="Your name and ID, activity sharing, search consent, Google sign-in, delete my data."
+            app:title="Account and privacy" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="About" app:iconSpaceReserved="false">
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="about"
+            app:summary="WBrowser 1.0 - built on the Gecko engine"
+            app:title="About WBrowser" />
+    </PreferenceCategory>
+</PreferenceScreen>

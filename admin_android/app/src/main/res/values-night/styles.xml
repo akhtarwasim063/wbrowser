@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="admin_bg">#0E1017</color>
+    <style name="Theme.Admin" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/admin_bg</item>
+        <item name="android:statusBarColor">@color/admin_bg</item>
+        <item name="android:navigationBarColor">@color/admin_bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

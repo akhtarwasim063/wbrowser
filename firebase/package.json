@@ -1,0 +1,19 @@
+{
+  "name": "wbrowser-firebase",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Firestore rules, hosting and admin tooling for WBrowser",
+  "scripts": {
+    "build:legal": "node scripts/build-legal.js",
+    "test": "firebase emulators:exec --only firestore --project demo-wbrowser \"node --test test/rules.test.js\"",
+    "deploy": "npm run build:legal && firebase deploy --only firestore,hosting"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.0.0"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
+    "firebase": "^11.0.0",
+    "firebase-tools": "^14.0.0"
+  }
+}
