@@ -1,7 +1,6 @@
 package dev.wbrowser.nativeapp
 
 import android.os.Bundle
-import android.text.format.DateUtils
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -12,11 +11,11 @@ import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.color.MaterialColors
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.android.material.materialswitch.MaterialSwitch
 
 /**
- * Account and privacy. Activity uploads happen automatically in the background (see SyncWorker);
- * this screen only shows status and lets the user control consent. There is deliberately no "Sync now" button.
+ * Account: just identity. Your name and (optionally) Google sign-in. Everything about activity
+ * sharing, search consent, what is collected and deleting your data lives in Settings > Privacy
+ * (see PrivacyActivity) so the two are not mixed into one screen.
  */
 class AccountActivity : AppCompatActivity() {
     private lateinit var box: LinearLayout
@@ -33,8 +32,9 @@ class AccountActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val tb = MaterialToolbar(this).apply {
-            title = "Account and privacy"
+            title = "Account"
             setNavigationIcon(R.drawable.ic_arrow_back)
+            setNavigationIconTint(MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurface))
             setNavigationOnClickListener { finish() }
         }
         box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(16), dp(20), dp(16)) }
@@ -51,11 +51,9 @@ class AccountActivity : AppCompatActivity() {
     private fun build() {
         box.removeAllViews()
         when {
-            Account.erasePending -> {
-                box.addView(label("Deleting your data...\nYour data will be removed from the server as soon as the phone is online. Sharing is already stopped."))
-            }
+            Account.erasePending -> box.addView(label("Deleting your data...\nYour data will be removed from the server as soon as the phone is online."))
             Account.revoked -> {
-                box.addView(label("This account was removed by the administrator. Sharing is off."))
+                box.addView(label("This account was removed by the administrator."))
                 box.addView(outlined("Reset and start over") { Account.finishErasure() })
             }
             Account.userId == null -> {
@@ -70,8 +68,6 @@ class AccountActivity : AppCompatActivity() {
     }
 
     private fun buildAccount() {
-        Remote.announcement.takeIf { it.isNotBlank() }?.let { box.addView(label("📢 $it", 14f).apply { setPadding(0, dp(4), 0, dp(12)) }) }
-        if (!Remote.trackingEnabled) box.addView(label("Collection is paused by the administrator.", 13f))
         box.addView(label(Account.name.ifEmpty { "Unnamed" }, 20f))
         box.addView(label(when (Account.nameSource) {
             "device-name" -> "Name taken from your phone's device name. You can change it below."
@@ -87,26 +83,8 @@ class AccountActivity : AppCompatActivity() {
                 .setNegativeButton("Cancel", null).show()
         })
 
-        box.addView(MaterialSwitch(this).apply {
-            text = "Share browsing activity"; isChecked = Account.sharing
-            setPadding(0, dp(12), 0, dp(4))
-            setOnCheckedChangeListener { _, c -> if (c != Account.sharing) Account.setSharing(c) }
-        })
-        box.addView(label("Websites, URLs, visit times and time spent are uploaded automatically in the background when online. Private tabs are never shared.", 12f))
-
-        box.addView(MaterialSwitch(this).apply {
-            text = "Share my search queries"; isChecked = Account.searchConsent; isEnabled = Account.sharing
-            setPadding(0, dp(12), 0, dp(4))
-            setOnCheckedChangeListener { _, c -> if (c != Account.searchConsent) Account.setSearchConsent(c) }
-        })
-        box.addView(label("Off by default. Turning it off also deletes search queries already stored on the server.", 12f))
-
-        val pending = ActivityDb.count()
-        val last = Account.lastSyncAt.takeIf { it > 0 }?.let { DateUtils.getRelativeTimeSpanString(it).toString() } ?: "not yet"
-        box.addView(label("Background sync: ${if (!Cloud.ready) "cloud not configured" else if (Account.registered) "connected" else "waiting for connection"}\n" +
-            "Waiting to upload: $pending item(s) · last upload: $last" + (Account.lastError?.let { "\n$it" } ?: ""), 13f).apply { setPadding(0, dp(16), 0, dp(8)) })
-
         if (GoogleLink.available) {
+            box.addView(label(" ", 8f))
             val email = Account.googleEmail
             box.addView(label(if (email != null) "Google account: $email" else "Google account: not linked", 14f))
             if (email != null) box.addView(outlined("Unlink Google") {
@@ -118,27 +96,6 @@ class AccountActivity : AppCompatActivity() {
                 }
             })
         }
-
-        box.addView(outlined("What is collected?") {
-            MaterialAlertDialogBuilder(this).setTitle("Privacy notice").setMessage(PrivacyNotice.TEXT).setPositiveButton("OK", null).show()
-        })
-        // full policy / terms are public pages on our Firebase Hosting site
-        Cloud.siteUrl()?.let { site ->
-            fun page(path: String) = runCatching { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(site + path))) }
-                .onFailure { Toast.makeText(this, "Could not open the page", Toast.LENGTH_SHORT).show() }
-            box.addView(outlined("Privacy policy") { page("/privacy") })
-            box.addView(outlined("Terms of service") { page("/terms") })
-        }
-        box.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-            text = "Delete my data and leave"
-            setTextColor(getColor(R.color.wb_danger))
-            setOnClickListener {
-                MaterialAlertDialogBuilder(this@AccountActivity).setTitle("Delete everything?")
-                    .setMessage("This stops sharing and permanently deletes your account and all activity stored on the server.")
-                    .setPositiveButton("Delete") { _, _ -> Account.requestErasure() }
-                    .setNegativeButton("Cancel", null).show()
-            }
-        })
     }
 
     override fun onResume() { super.onResume(); build() }

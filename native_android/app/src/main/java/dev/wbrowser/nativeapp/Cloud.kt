@@ -62,6 +62,19 @@ object Cloud {
     /** The signed-in Firebase user, without ever creating one. */
     fun currentUid(): String? = if (ready) auth.currentUser?.uid else null
 
+    /**
+     * Real-time-ish presence: written immediately when the app is foregrounded/backgrounded (never
+     * queued through the offline outbox, since presence has no meaning once the device is offline
+     * anyway), so the admin console can show a live online/offline state instead of guessing from a
+     * stale last-seen time. Fire-and-forget: never blocks, never retried, and silently does nothing
+     * before the profile exists yet.
+     */
+    fun setOnline(online: Boolean) {
+        if (!ready || !Account.registered) return
+        val uid = currentUid() ?: return
+        runCatching { userDoc(uid).update(mapOf("online" to online, "lastSeen" to System.currentTimeMillis())).addOnFailureListener {} }
+    }
+
     /** Reads the superadmin's remote settings (config/app); a missing doc means defaults. */
     fun fetchConfig() {
         val d = await(db.collection("config").document("app").get()).data

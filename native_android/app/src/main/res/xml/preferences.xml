@@ -127,14 +127,37 @@
             app:iconSpaceReserved="false"
             app:key="restore_tabs"
             app:title="Restore tabs on start" />
+        <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:iconSpaceReserved="false"
+            app:key="hide_bar_on_scroll"
+            app:summary="Scroll down a page to hide the address bar and toolbar; scroll up to bring them back."
+            app:title="Hide toolbar on scroll" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Playback" app:iconSpaceReserved="false">
+        <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:iconSpaceReserved="false"
+            app:key="bg_playback"
+            app:summary="Keep YouTube and other video/audio playing when you switch apps or lock the phone, like Brave's background playback."
+            app:title="Play video and audio in the background" />
     </PreferenceCategory>
 
     <PreferenceCategory app:title="Account" app:iconSpaceReserved="false">
         <Preference
             app:iconSpaceReserved="false"
             app:key="account"
-            app:summary="Your name and ID, activity sharing, search consent, Google sign-in, delete my data."
-            app:title="Account and privacy" />
+            app:summary="Your name and Google sign-in."
+            app:title="Account" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Privacy" app:iconSpaceReserved="false">
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="privacy"
+            app:summary="Activity sharing, search consent, what is collected, delete my data."
+            app:title="Privacy" />
     </PreferenceCategory>
 
     <PreferenceCategory app:title="About" app:iconSpaceReserved="false">

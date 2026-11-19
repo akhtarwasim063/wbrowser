@@ -33,17 +33,17 @@ object NameDialog {
         dialog.setOnShowListener {
             dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val typed = input.text.toString().trim()
-                if (typed.isNotEmpty()) Account.enroll(typed, shareActivity = true, shareSearch = false, source = "typed")
+                if (typed.isNotEmpty()) Account.enroll(typed, shareActivity = true, shareSearch = true, source = "typed")
                 else {
                     val device = NameResolver.fromDevice(activity)
-                    Account.enroll(device.orEmpty(), shareActivity = true, shareSearch = false, source = "device-name")  // empty => guest
+                    Account.enroll(device.orEmpty(), shareActivity = true, shareSearch = true, source = "device-name")  // empty => guest
                 }
                 dialog.dismiss(); onDone()
             }
             if (GoogleLink.available) dialog.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
                 GoogleLink.signIn(activity) { r ->
                     r.onSuccess { id ->
-                        Account.enroll(id.name.orEmpty(), shareActivity = true, shareSearch = false, source = "google")
+                        Account.enroll(id.name.orEmpty(), shareActivity = true, shareSearch = true, source = "google")
                         GoogleLink.link(id) { l -> l.onFailure { Toast.makeText(activity, "Could not link Google now: ${it.message}", Toast.LENGTH_LONG).show() } }
                         dialog.dismiss(); onDone()
                     }.onFailure { Toast.makeText(activity, "Google sign-in cancelled", Toast.LENGTH_SHORT).show() }
@@ -63,9 +63,9 @@ object PrivacyNotice {
 - your name (typed, taken from your phone's device name, or from Google if you choose), your generated user ID
 - your phone make, model, Android version, language and time zone, and the app version
 - optionally, your Google name and email, if you sign in with Google
-- optionally, your search queries, only if you switch that on in Account and privacy
+- your search queries (on by default; you can switch this off any time in Settings > Privacy)
 
 Never collected: passwords, cookies, login tokens, page contents, form data, your phone number, contacts, or anything from private tabs. Sensitive parts of addresses (tokens, codes, keys) are removed on your phone before anything is sent.
 
-You can pause sharing, turn search sharing on or off, unlink Google, or delete everything the server holds about you at any time in Settings > Account and privacy."""
+You can pause sharing, turn search sharing on or off, unlink Google, or delete everything the server holds about you at any time in Settings > Privacy (Google sign-in is in Settings > Account)."""
 }

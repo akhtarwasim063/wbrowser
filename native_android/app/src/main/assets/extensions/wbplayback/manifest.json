@@ -1,0 +1,15 @@
+{
+  "manifest_version": 2,
+  "name": "WBrowser Background Playback",
+  "version": "1.0",
+  "description": "Keeps video and audio playing when the app is minimised or the screen is locked.",
+  "browser_specific_settings": { "gecko": { "id": "wbplayback@wbrowser.dev" } },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["keepalive.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ]
+}

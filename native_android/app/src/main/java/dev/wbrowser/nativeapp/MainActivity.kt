@@ -1,16 +1,23 @@
 package dev.wbrowser.nativeapp
 
 import android.app.DownloadManager
+import android.app.PictureInPictureParams
+import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Rational
+import androidx.core.content.ContextCompat
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.LayoutInflater
@@ -75,8 +82,12 @@ class MainActivity : AppCompatActivity(), TabHost {
     private lateinit var findBar: View
     private lateinit var findInput: EditText
     private lateinit var findCount: TextView
+    private lateinit var btnPip: View
+    private lateinit var btnShowBars: View
 
     private var settingText = false
+    private var barsHidden = false   // theater mode: app bar manually hidden to give the page more room
+    private var inPip = false
     private val tabAdapter = TabAdapter()
 
     override fun context(): Context = this
@@ -102,6 +113,41 @@ class MainActivity : AppCompatActivity(), TabHost {
 
         // First install: just ask for the name.
         if (!Account.onboarded) NameDialog.show(this)
+
+        // Needed on Android 13+ to show the background-playback notification; harmless if denied -
+        // playback still continues, the user just won't see the Pause/Stop controls.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) notifPermLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+
+        ContextCompat.registerReceiver(this, screenStateReceiver, IntentFilter(Intent.ACTION_SCREEN_OFF), ContextCompat.RECEIVER_NOT_EXPORTED)
+    }
+
+    private val notifPermLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    /**
+     * Mirrors Brave's own screen-lock handling for background playback (see
+     * BraveYouTubePictureInPictureController.markInterruptedByScreenLock /
+     * maybeSuspendForScreenLock): locking the screen is a window-focus-loss event that can make the
+     * page's own player - or the engine - pause on its own, same as a plain backgrounded tab. If
+     * "Play video and audio in the background" (Settings > Playback) is off, pause explicitly and
+     * cleanly instead of leaving that to chance. If it is on, best-effort nudge playback to resume
+     * shortly after in case something paused it anyway; this never fights a pause the user asked for.
+     */
+    private var wasPlayingBeforeScreenOff = false
+    private val screenStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action != Intent.ACTION_SCREEN_OFF) return
+            val t = current ?: return
+            wasPlayingBeforeScreenOff = t.isPlayingMedia || t.isFullscreenVideo
+            if (!wasPlayingBeforeScreenOff) return
+            if (!Prefs.bool("bg_playback", true)) {
+                if (t.isPlayingMedia) t.pauseMediaPlayback()
+            } else {
+                backgroundResumeWanted = true
+                resumeAfterBackgrounding(t, "screen-off")
+            }
+        }
     }
 
     private fun bindViews() {
@@ -124,6 +170,10 @@ class MainActivity : AppCompatActivity(), TabHost {
         findBar = findViewById(R.id.findBar)
         findInput = findViewById(R.id.findInput)
         findCount = findViewById(R.id.findCount)
+        btnPip = findViewById(R.id.btnPip)
+        btnShowBars = findViewById(R.id.btnShowBars)
+        btnPip.setOnClickListener { enterMiniPlayer() }
+        btnShowBars.setOnClickListener { setBarsHidden(false) }
     }
 
     private fun applySystemBars() {
@@ -148,15 +198,27 @@ class MainActivity : AppCompatActivity(), TabHost {
 
     override fun onPause() {
         super.onPause()
+        android.util.Log.d("WBMedia", "activity onPause playing=${current?.isPlayingMedia} fs=${current?.isFullscreenVideo} pip=$inPip")
+        // leaving the app with media playing: keep the page active so it doesn't pause itself
+        current?.let { t -> if (t.isPlayingMedia && Prefs.bool("bg_playback", true)) { backgroundResumeWanted = true; keepPageActive(t); resumeAfterBackgrounding(t, "pause") } }
         Tracker.onAppBackground()
         saveTabs()
     }
 
+    override fun onStop() {
+        super.onStop()
+        android.util.Log.d("WBMedia", "activity onStop playing=${current?.isPlayingMedia} pip=$inPip")
+    }
+
     override fun onDestroy() {
         super.onDestroy()
-        if (isFinishing && Prefs.bool("clear_on_exit", false)) {
-            Engine.runtime.storageController.clearData(StorageController.ClearFlags.ALL)
-            HistoryDb.clearAll()
+        runCatching { unregisterReceiver(screenStateReceiver) }
+        if (isFinishing) {
+            MediaPlaybackService.stop(this)
+            if (Prefs.bool("clear_on_exit", false)) {
+                Engine.runtime.storageController.clearData(StorageController.ClearFlags.ALL)
+                HistoryDb.clearAll()
+            }
         }
         tabs.forEach { it.close() }
     }
@@ -317,11 +379,137 @@ class MainActivity : AppCompatActivity(), TabHost {
             }
         )
         topBar.setBackgroundColor(if (t.isPrivate) ColorUtils.setAlphaComponent(getColor(R.color.wb_private), 40) else 0)
+        btnPip.visibility = if ((t.isPlayingMedia || t.isFullscreenVideo) && !inPip) View.VISIBLE else View.GONE
+    }
+
+    // ======================= scroll-to-hide toolbar =======================
+    // Hiding the bars resizes the page, which shifts the scroll position and used to look like a
+    // scroll in the opposite direction -> bars flipped back and forth ("glitching" / stuck scroll).
+    // So: accumulate real movement in one direction, wait for a clear threshold, then ignore the
+    // layout-induced jump for a short cooldown and re-baseline.
+    private var scrollAccum = 0
+    private var scrollIgnoreUntil = 0L
+    private var scrollResync = false
+    private var barsHiddenByScroll = false
+
+    override fun onContentScroll(tab: BrowserTab, deltaY: Int, scrollY: Int) {
+        if (tab !== current || inPip || tabSwitcher.visibility == View.VISIBLE || urlBar.hasFocus()) return
+        if (!Prefs.bool("hide_bar_on_scroll", true)) return
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now < scrollIgnoreUntil) { scrollResync = true; return }
+        if (scrollResync) { scrollResync = false; scrollAccum = 0; return }   // first event after a relayout: bogus delta
+        if (scrollY <= 8) {
+            scrollAccum = 0
+            if (barsHiddenByScroll) toggleBarsForScroll(false)
+            return
+        }
+        if (deltaY == 0) return
+        if (scrollAccum != 0 && (deltaY > 0) != (scrollAccum > 0)) scrollAccum = 0   // direction changed
+        scrollAccum += deltaY
+        if (scrollAccum > 140 && !barsHiddenByScroll) toggleBarsForScroll(true)
+        else if (scrollAccum < -70 && barsHiddenByScroll) toggleBarsForScroll(false)
+    }
+
+    private fun toggleBarsForScroll(hide: Boolean) {
+        barsHiddenByScroll = hide
+        scrollAccum = 0
+        scrollIgnoreUntil = android.os.SystemClock.uptimeMillis() + 450
+        android.util.Log.d("WBScroll", "bars hidden=$hide")
+        ui.post { setBarsHidden(hide) }
     }
 
     override fun onTabChanged(tab: BrowserTab) {
         if (tab === current) syncUi() else tabCount.text = tabs.size.toString()
         if (tabSwitcher.visibility == View.VISIBLE) tabAdapter.refresh()
+    }
+
+    // ======================= mini-player (PiP) + background playback =======================
+    override fun onMediaChanged(tab: BrowserTab) {
+        if (tab === current) syncUi()
+        if (tab.isPlayingMedia) {
+            MediaBridge.onToggle = { tab.toggleMediaPlayback() }
+            MediaBridge.onStop = { tab.pauseMediaPlayback() }
+            MediaPlaybackService.update(this, tab.mediaTitle.ifBlank { tab.displayTitle() }, true)
+        } else if (tabs.none { it.isPlayingMedia }) {
+            MediaPlaybackService.stop(this)
+        }
+    }
+
+    /** Pops the current page out into Android's floating mini-player window. */
+    private fun enterMiniPlayer() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val params = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build()
+        val ok = runCatching { enterPictureInPictureMode(params) }
+        android.util.Log.d("WBMedia", "enterPip -> $ok")
+    }
+
+    /**
+     * Pages (YouTube especially) pause themselves the moment the app leaves the foreground. Brave
+     * handles this by resuming the media session right after PiP entry; we do the same, and also
+     * after the screen locks, retrying a few times because the page can pause a moment late.
+     * Only runs for a short window after we saw it playing, so a deliberate user pause is respected.
+     */
+    private fun resumeAfterBackgrounding(tab: BrowserTab?, reason: String) {
+        if (tab == null) return
+        keepPageActive(tab)
+        for (delay in longArrayOf(250, 700, 1400, 2500)) {
+            ui.postDelayed({
+                val t = current
+                if (t === tab && backgroundResumeWanted) {
+                    keepPageActive(t)
+                    if (!t.isPlayingMedia) {
+                        val ok = t.resumeMediaPlayback()
+                        android.util.Log.d("WBMedia", "resume($reason) after ${delay}ms -> $ok")
+                    }
+                }
+            }, delay)
+        }
+        ui.postDelayed({ backgroundResumeWanted = false }, 3000)
+    }
+
+    /** Tell the engine the page is still active and focused. When the app leaves the foreground the
+     *  page otherwise sees itself as hidden/blurred, and players like YouTube's pause on their own
+     *  (re-pausing every time we resume). */
+    private fun keepPageActive(tab: BrowserTab) {
+        runCatching { tab.session.setActive(true); tab.session.setFocused(true) }
+    }
+    private var backgroundResumeWanted = false
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        inPip = isInPictureInPictureMode
+        if (isInPictureInPictureMode && Prefs.bool("bg_playback", true)) {
+            backgroundResumeWanted = true
+            resumeAfterBackgrounding(current, "pip")
+        }
+        // the mini-player window has no room (or need) for our own chrome - just the page
+        val v = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
+        topBar.visibility = v
+        bottomBar.visibility = v
+        btnPip.visibility = View.GONE
+        btnShowBars.visibility = View.GONE
+        if (isInPictureInPictureMode) { hideSwitcher(); closeFind() } else syncUi()
+    }
+
+    /** Leaving the app (home / recents / screen off) while a video/streaming page is playing:
+     *  pop it into the mini-player automatically instead of silently stopping, like Brave does. */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        val t = current
+        android.util.Log.d("WBMedia", "userLeaveHint playing=${t?.isPlayingMedia} fs=${t?.isFullscreenVideo}")
+        if (!inPip && t != null && (t.isPlayingMedia || t.isFullscreenVideo)) enterMiniPlayer()
+    }
+
+    /** Theater mode: hide the address/toolbars so a video gets the whole screen; a small chip in
+     *  the corner brings them back. */
+    private fun setBarsHidden(hidden: Boolean) {
+        barsHidden = hidden
+        barsHiddenByScroll = hidden
+        scrollAccum = 0
+        scrollIgnoreUntil = android.os.SystemClock.uptimeMillis() + 450
+        topBar.visibility = if (hidden) View.GONE else View.VISIBLE
+        bottomBar.visibility = if (hidden) View.GONE else View.VISIBLE
+        btnShowBars.visibility = if (hidden) View.VISIBLE else View.GONE
     }
 
     // ======================= tabs =======================
@@ -504,6 +692,8 @@ class MainActivity : AppCompatActivity(), TabHost {
                 Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, t.url).putExtra(Intent.EXTRA_SUBJECT, t.title), "Share link"))
         }
         item(R.drawable.ic_search, "Find in page") { openFind() }
+        item(R.drawable.ic_theater, "Hide toolbar") { setBarsHidden(true) }
+        if (t.isPlayingMedia || t.isFullscreenVideo) item(R.drawable.ic_pip, "Mini player (picture-in-picture)") { enterMiniPlayer() }
         item(R.drawable.ic_desktop, "Desktop site", t.desktop) { t.setDesktop(!t.desktop) }
         item(R.drawable.ic_settings, "Settings") { startActivity(Intent(this, SettingsActivity::class.java)) }
         dlg.setContentView(scroll)
@@ -583,8 +773,11 @@ class MainActivity : AppCompatActivity(), TabHost {
 
     // ======================= TabHost callbacks =======================
     override fun onFullScreen(on: Boolean) {
-        val v = if (on) View.GONE else View.VISIBLE
+        // leaving the page's own fullscreen (e.g. a video player's fullscreen button) restores the
+        // bars unless the user had separately hidden them with theater mode
+        val v = if (on || barsHidden) View.GONE else View.VISIBLE
         topBar.visibility = v; bottomBar.visibility = v
+        btnShowBars.visibility = if (!on && barsHidden) View.VISIBLE else View.GONE
         WindowCompat.getInsetsController(window, window.decorView).apply {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             if (on) hide(WindowInsetsCompat.Type.systemBars()) else show(WindowInsetsCompat.Type.systemBars())

@@ -1,5 +1,5 @@
 // WBrowser Admin App (Firebase). Plain JS, no inline code (strict CSP). All dynamic text goes through textContent.
-import { api as fbApi, initFirebase, configured, csvDownload, refreshData } from './fb.js';
+import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watchPresence, bustUsers } from './fb.js';
 (() => {
   const root = document.getElementById('app');
   let me = null;
@@ -9,6 +9,16 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData } from
   applyTheme();
   const filter = { preset: prefs.get('range', '7'), from: '', to: '' }; // shared date filter
   let currentLoad = null, refreshTimer = null;
+
+  // ---------- live presence (online/offline) ----------
+  // One Firestore listener for the whole session; any change re-runs whatever view is open so the
+  // online dots update within about a second, with no manual refresh needed.
+  let presenceUnsub = null;
+  function startPresence() {
+    if (presenceUnsub || !me) return;
+    presenceUnsub = watchPresence(() => { bustUsers(); if (currentLoad) currentLoad(); });
+  }
+  function stopPresence() { presenceUnsub?.(); presenceUnsub = null; }
 
   // ---------- tiny DOM helpers ----------
   const h = (tag, attrs, ...kids) => {
@@ -74,7 +84,10 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData } from
     if (d < 86400000) return `${Math.floor(d / 3600000)} h ago`;
     return `${Math.floor(d / 86400000)} d ago`;
   };
-  const online = (ms) => ms && Date.now() - ms < 5 * 60000;
+  // Real-time: `online` is written by the phone the instant it is foregrounded/backgrounded (see
+  // Cloud.setOnline), so a Firestore listener (watchPresence, below) keeps it live within ~1s.
+  // The staleness fallback only covers an app build too old to send it, or an unclean process kill.
+  const online = (u) => { if (!u) return false; if (u.online === true) return true; const ms = typeof u === 'object' ? u.last_seen : u; return !!ms && Date.now() - ms < 60000; };
   // Only http(s) targets become links (URLs are untrusted data). Opens in a new tab, no referrer / opener.
   const extLink = (href, text) => (/^https?:\/\//i.test(href) ? h('a', { href, target: '_blank', rel: 'noopener noreferrer', title: 'Open in new tab', onclick: (e) => e.stopPropagation() }, text) : text);
   const siteLink = (domain) => extLink('https://' + domain, domain);
@@ -201,7 +214,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData } from
             h('div', {}, card('Activity by hour', 'When people browse (your local time)', colChart(d.hourly, 'visits', 'Visits by hour', (r) => `${r.hour}h`)),
               card('Recently active', null, d.recentUsers.length ? h('div', { class: 'bars' }, d.recentUsers.map((u) => h('div', { class: 'who' },
                 avatar(u.name), h('div', {}, h('b', {}, u.name), h('span', { class: 'sub' }, `${u.code || ''}`)),
-                h('span', { class: 'pill ' + (online(u.last_seen) ? 'ok' : '') }, online(u.last_seen) ? 'online' : ago(u.last_seen))))) : h('div', { class: 'empty' }, 'No users yet.')))));
+                h('span', { class: 'pill ' + (online(u) ? 'ok' : '') }, online(u) ? 'online' : ago(u.last_seen))))) : h('div', { class: 'empty' }, 'No users yet.')))));
       } catch (e) { box.replaceChildren(errBox(e)); }
     };
     return [dateBar(load), box, load];
@@ -244,7 +257,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData } from
         box.replaceChildren(h('div', { class: 'card' }, table([
           { label: 'User', cell: (r) => h('div', { class: 'who' }, avatar(r.name), h('div', {}, h('b', {}, r.name), h('span', { class: 'sub' }, r.email || r.google_name || r.code || r.id))) },
           { label: 'User ID', cell: (r) => r.code || r.id },
-          { label: 'Last seen', cell: (r) => h('span', {}, h('i', { class: 'dot ' + (online(r.last_seen) ? 'on' : '') }), ago(r.last_seen)) },
+          { label: 'Last seen', cell: (r) => h('span', {}, h('i', { class: 'dot ' + (online(r) ? 'on' : '') }), online(r) ? 'Online' : ago(r.last_seen)) },
           { label: 'Visits', num: 1, cell: (r) => fmt(r.visits) }, { label: 'Browsing', num: 1, cell: (r) => dur(r.totalMs) }, { label: 'Sessions', num: 1, cell: (r) => dur(r.sessionMs) },
           { label: 'Status', cell: (r) => h('span', { class: 'pill ' + (r.status === 'active' ? 'ok' : 'warn') }, r.status === 'active' ? 'Active' : 'Suspended') }],
           d.rows, (r) => { location.hash = '#/users/' + r.id; }), pager(page, d.total, 25, (p) => { page = p; load(); })));
@@ -279,7 +292,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData } from
           h('div', { class: 'card' }, h('div', { class: 'hero' }, avatar(u.name, 'lg'),
             h('div', { class: 'info' }, h('h2', {}, u.name), h('div', { class: 'sub' }, `${u.code || u.id}${u.email ? ' · ' + u.email : ''}`),
               h('div', { class: 'chips' },
-                h('span', { class: 'pill ' + (online(u.last_seen) ? 'ok' : '') }, online(u.last_seen) ? 'Online now' : `Seen ${ago(u.last_seen)}`),
+                h('span', { class: 'pill ' + (online(u) ? 'ok' : '') }, online(u) ? 'Online now' : `Seen ${ago(u.last_seen)}`),
                 h('span', { class: 'pill' }, `Registered ${dt(u.created_at)}`),
                 h('span', { class: 'pill' }, `${u.manufacturer ? u.manufacturer + ' ' : ''}${u.device_model || 'Unknown device'} · Android ${u.os_version || '?'}${u.sdk ? ' (API ' + u.sdk + ')' : ''} · app ${u.app_version || '?'}`),
                 u.locale ? h('span', { class: 'pill' }, `${u.locale}${u.timezone ? ' · ' + u.timezone : ''}`) : null,
@@ -540,7 +553,8 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData } from
   }
 
   async function render(msg) {
-    if (!me) { clearInterval(refreshTimer); root.replaceChildren(loginView(typeof msg === 'string' ? msg : '')); return; }
+    if (!me) { stopPresence(); clearInterval(refreshTimer); root.replaceChildren(loginView(typeof msg === 'string' ? msg : '')); return; }
+    startPresence();
     const hash = location.hash || '#/';
     const uid = /^#\/users\/(.+)$/.exec(hash);
     const site = /^#\/websites\/(.+)$/.exec(hash);
@@ -580,5 +594,37 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData } from
     render(configured() ? '' : 'Firebase is not configured yet: paste your web config into firebase-config.js and redeploy.');
   }
   window.addEventListener('hashchange', () => { if (me) render(); });
+  setupPullToRefresh();
   boot();
+
+  // ---------- pull-to-refresh: drag down from the very top of any page ----------
+  function setupPullToRefresh() {
+    const el = h('div', { class: 'ptr' }, ico('refresh'));
+    document.body.appendChild(el);
+    const THRESHOLD = 64;
+    const atTop = () => (document.scrollingElement || document.documentElement).scrollTop <= 2;
+    let startY = 0, active = false, armed = false;
+    document.addEventListener('touchstart', (e) => {
+      armed = me != null && atTop() && e.touches.length === 1;
+      active = false;
+      if (armed) startY = e.touches[0].clientY;
+    }, { passive: true });
+    document.addEventListener('touchmove', (e) => {
+      if (!armed) return;
+      const dy = e.touches[0].clientY - startY;
+      if (dy <= 0 || !atTop()) { armed = false; active = false; el.classList.remove('show', 'go'); el.style.transform = ''; return; }
+      active = true;
+      const d = Math.min(dy * 0.5, 92);
+      el.classList.add('show');
+      el.classList.toggle('go', d >= THRESHOLD);
+      el.style.transform = `translate(-50%,${d}px) rotate(${d * 3}deg)`;
+    }, { passive: true });
+    const release = () => {
+      if (active && el.classList.contains('go')) { refreshData(); bustUsers(); if (currentLoad) currentLoad(); else render(); }
+      armed = false; active = false;
+      el.classList.remove('show', 'go'); el.style.transform = '';
+    };
+    document.addEventListener('touchend', release);
+    document.addEventListener('touchcancel', release);
+  }
 })();

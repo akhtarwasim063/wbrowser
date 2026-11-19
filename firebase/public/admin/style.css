@@ -224,3 +224,30 @@ tr.click td a{position:relative}
 
 button.link{background:none;border:0;color:var(--pri);padding:4px;min-height:0;font-weight:600;justify-content:center;align-self:center}
 button.link:hover{background:none;text-decoration:underline}
+
+/* ---------- pull-to-refresh ---------- */
+.ptr{position:fixed;top:10px;left:50%;transform:translate(-50%,-40px);width:36px;height:36px;border-radius:50%;
+  background:var(--card);box-shadow:var(--shadow);display:grid;place-items:center;color:var(--mut);opacity:0;
+  z-index:40;pointer-events:none;transition:opacity .15s,color .15s}
+.ptr.show{opacity:1}
+.ptr.go{color:var(--pri)}
+.ptr .ic{width:18px;height:18px}
+
+/* ---------- clickability / touch feedback ---------- */
+tr.click:active{background:var(--soft)}
+.listrow:active{background:var(--soft)}
+button:active{transform:scale(.97)}
+.seg button:active{transform:none}
+@media (hover:hover) and (pointer:fine){
+  .card,.kpi{transition:box-shadow .15s,transform .15s}
+  .card:hover,.kpi:hover{box-shadow:0 2px 6px rgba(18,20,31,.08),0 16px 34px -16px rgba(18,20,31,.22)}
+}
+/* every clickable row/card needs an obvious pointer + a minimum touch target on phones */
+tr.click,.listrow,.tabbar a,nav a.item{cursor:pointer}
+@media (max-width:760px){
+  tr.click{min-height:44px}
+  .listrow{min-height:48px}
+}
+@media (max-width:420px){
+  .grid{grid-template-columns:1fr}
+}

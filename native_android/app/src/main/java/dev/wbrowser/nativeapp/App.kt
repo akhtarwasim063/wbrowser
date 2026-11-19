@@ -46,8 +46,10 @@ class App : Application() {
 object Engine {
     const val UBO_ID = "uBlock0@raymondhill.net"
     const val WB_ID = "wbshield@wbrowser.dev"
+    const val WP_ID = "wbplayback@wbrowser.dev"   // keeps pages "visible" so video keeps playing in the background
     private const val UBO_URL = "https://addons.mozilla.org/firefox/downloads/latest/ublock-origin/latest.xpi"
     private const val WB_URI = "resource://android/assets/extensions/wbshield/"
+    private const val WP_URI = "resource://android/assets/extensions/wbplayback/"
 
     lateinit var runtime: GeckoRuntime
         private set
@@ -150,6 +152,7 @@ object Engine {
                 val want = when (ext.id) {
                     UBO_ID -> shieldsOn
                     WB_ID -> shieldsOn && Prefs.bool("youtube_shield", true)
+                    WP_ID -> Prefs.bool("bg_playback", true)
                     else -> return@forEach
                 }
                 if (ext.id == UBO_ID) uboBaseUrl = ext.metaData?.baseUrl
@@ -184,5 +187,6 @@ object Engine {
     /** Our own small extension (YouTube backup shield), bundled in the APK. */
     private fun ensureBuiltIn() {
         runtime.webExtensionController.ensureBuiltIn(WB_URI, WB_ID).accept({ syncExtensions() }, { })
+        runtime.webExtensionController.ensureBuiltIn(WP_URI, WP_ID).accept({ syncExtensions() }, { })
     }
 }

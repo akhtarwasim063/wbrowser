@@ -19,6 +19,7 @@ class SettingsActivity : AppCompatActivity() {
         val toolbar = MaterialToolbar(this).apply {
             title = "Settings"
             setNavigationIcon(R.drawable.ic_arrow_back)
+            setNavigationIconTint(com.google.android.material.color.MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurface))
             setNavigationOnClickListener { finish() }
         }
         val container = FrameLayout(this).apply { id = R.id.settingsContainer }
@@ -57,6 +58,9 @@ class SettingsActivity : AppCompatActivity() {
             findPreference<Preference>("clear_data")?.setOnPreferenceClickListener { showClearDialog(); true }
             findPreference<Preference>("account")?.setOnPreferenceClickListener {
                 startActivity(Intent(requireContext(), AccountActivity::class.java)); true
+            }
+            findPreference<Preference>("privacy")?.setOnPreferenceClickListener {
+                startActivity(Intent(requireContext(), PrivacyActivity::class.java)); true
             }
             findPreference<Preference>("about")?.setOnPreferenceClickListener {
                 MaterialAlertDialogBuilder(requireContext()).setTitle("WBrowser 1.0")

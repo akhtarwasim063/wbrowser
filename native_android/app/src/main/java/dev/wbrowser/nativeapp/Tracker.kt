@@ -32,7 +32,11 @@ object Tracker {
 
     private val checkpointTask = object : Runnable {
         override fun run() {
-            if (appActive) { checkpointAll(); main.postDelayed(this, CHECKPOINT_MS) }
+            if (appActive) {
+                checkpointAll()
+                if (Account.collecting) Cloud.setOnline(true)   // heartbeat: keeps "online" fresh for the admin console
+                main.postDelayed(this, CHECKPOINT_MS)
+            }
         }
     }
 
@@ -51,6 +55,7 @@ object Tracker {
             focused = current
             current?.let { c -> open[c]?.let { if (it.since == 0L) it.since = t } }
             main.removeCallbacks(checkpointTask); main.postDelayed(checkpointTask, CHECKPOINT_MS)
+            Cloud.setOnline(true)
         }
     }
 
@@ -61,6 +66,7 @@ object Tracker {
         lastBackground = now()
         pauseAll()
         checkpointAll()
+        if (Account.collecting) Cloud.setOnline(false)
         SyncScheduler.kickNow()
     }
 
@@ -98,6 +104,7 @@ object Tracker {
     /** Sharing switched off / account erased: drop everything in flight without queuing it. */
     fun stop() {
         open.clear(); sessionId = null
+        Cloud.setOnline(false)
     }
 
     // ---------- internals ----------

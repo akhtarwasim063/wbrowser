@@ -97,6 +97,34 @@
             android:elevation="8dp"
             android:visibility="gone" />
 
+        <!-- Shown only while a video/streaming page is playing: pop the page out into Android's
+             floating mini-player (picture-in-picture), like Brave's background-play button. -->
+        <com.google.android.material.floatingactionbutton.FloatingActionButton
+            android:id="@+id/btnPip"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|end"
+            android:layout_margin="16dp"
+            app:fabSize="mini"
+            app:srcCompat="@drawable/ic_pip"
+            android:contentDescription="Mini player (picture-in-picture)"
+            android:visibility="gone" />
+
+        <!-- Shown only while the app bar is hidden (theater mode); tap to bring it back. -->
+        <ImageView
+            android:id="@+id/btnShowBars"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_gravity="top|end"
+            android:layout_margin="10dp"
+            android:background="@drawable/bg_circle"
+            android:backgroundTint="#99000000"
+            android:padding="9dp"
+            android:src="@drawable/ic_down"
+            android:tint="#FFFFFFFF"
+            android:contentDescription="Show toolbar"
+            android:visibility="gone" />
+
         <!-- Tab switcher (grid, normal / private) -->
         <FrameLayout
             android:id="@+id/tabSwitcher"

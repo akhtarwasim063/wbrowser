@@ -59,7 +59,9 @@ class HistoryActivity : AppCompatActivity() {
         tb.title = if (bookmarks) "Bookmarks" else "History"
         tb.setNavigationOnClickListener { finish() }
         if (!bookmarks) {
-            tb.menu.add("Clear all").setIcon(R.drawable.ic_delete).setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
+            // Text action, not an icon: a plain icon here does not pick up a theme tint and used to
+            // disappear against a dark toolbar in dark mode.
+            tb.menu.add("Clear all").setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS or android.view.MenuItem.SHOW_AS_ACTION_WITH_TEXT)
             tb.setOnMenuItemClickListener {
                 MaterialAlertDialogBuilder(this).setTitle("Clear all history?")
                     .setMessage("This also removes it from your synced devices.")

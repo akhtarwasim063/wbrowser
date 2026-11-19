@@ -12,6 +12,7 @@ import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoSessionSettings
+import org.mozilla.geckoview.MediaSession
 import org.mozilla.geckoview.WebRequestError
 import org.mozilla.geckoview.WebResponse
 
@@ -22,6 +23,12 @@ interface TabHost {
     fun newTabForWindow(opener: BrowserTab): BrowserTab
     fun onPopupBlocked(tab: BrowserTab, uri: String)
     fun onContextMenu(tab: BrowserTab, element: GeckoSession.ContentDelegate.ContextElement)
+    /** Media (audio/video) on this tab started, stopped, or paused/resumed - drives the mini-player
+     *  button and the background-playback notification. */
+    fun onMediaChanged(tab: BrowserTab)
+    /** The page scrolled. deltaY > 0 means the page moved down (user scrolled down the content,
+     *  which is the usual "hide the toolbar" gesture); scrollY is the absolute position. */
+    fun onContentScroll(tab: BrowserTab, deltaY: Int, scrollY: Int)
     val prompts: GeckoSession.PromptDelegate
     val permissions: GeckoSession.PermissionDelegate
 }
@@ -53,6 +60,37 @@ class BrowserTab(private val host: TabHost, val isPrivate: Boolean) {
     var desktop = Prefs.bool("desktop_default", false)
         private set
 
+    /** True while this tab's page has audio/video actively playing (drives the mini-player button
+     *  and the background-playback notification). */
+    var isPlayingMedia = false
+        private set
+    var mediaTitle = ""
+        private set
+    private var activeMediaSession: MediaSession? = null
+
+    /** True while the page has a video in HTML5 fullscreen (the signal nearly every streaming
+     *  site - YouTube, Netflix, Prime, Hotstar... - uses for its player). More reliable than the
+     *  media-session play/pause events on sites with unusual players, so it is the primary trigger
+     *  for the mini-player (PiP) button and auto-pop on leaving the app. */
+    var isFullscreenVideo = false
+        private set
+    private var lastScrollY = 0
+
+    /** Pause/resume the page's current media, e.g. from the background-playback notification. */
+    fun toggleMediaPlayback() {
+        activeMediaSession?.let { if (isPlayingMedia) it.pause() else it.play() }
+    }
+
+    fun pauseMediaPlayback() { activeMediaSession?.pause() }
+
+    /** Play only (never toggles), used to undo a pause the page/engine did on its own when the
+     *  app left the foreground. Returns false if there is no media session to resume. */
+    fun resumeMediaPlayback(): Boolean {
+        val s = activeMediaSession ?: return false
+        s.play()
+        return true
+    }
+
     val isNewTab get() = Prefs.isNewTab(url)
     val loading get() = progress in 1..99
 
@@ -72,7 +110,11 @@ class BrowserTab(private val host: TabHost, val isPrivate: Boolean) {
                 Tracker.onTitle(this@BrowserTab, title)
                 host.onTabChanged(this@BrowserTab)
             }
-            override fun onFullScreen(s: GeckoSession, fullScreen: Boolean) = host.onFullScreen(fullScreen)
+            override fun onFullScreen(s: GeckoSession, fullScreen: Boolean) {
+                isFullscreenVideo = fullScreen
+                host.onFullScreen(fullScreen)
+                host.onMediaChanged(this@BrowserTab)
+            }
             override fun onContextMenu(
                 s: GeckoSession, screenX: Int, screenY: Int,
                 element: GeckoSession.ContentDelegate.ContextElement,
@@ -83,6 +125,50 @@ class BrowserTab(private val host: TabHost, val isPrivate: Boolean) {
                 s.close(); s.open(Engine.runtime); if (url.isNotEmpty()) s.loadUri(url)
             }
             override fun onKill(s: GeckoSession) = onCrash(s)
+        }
+
+        // Background playback / mini-player: tracks whether this page currently has audio or
+        // video playing, so the host can show the pop-out (PiP) button and keep a foreground
+        // notification alive while the app is backgrounded (YouTube and other streaming sites).
+        session.mediaSessionDelegate = object : MediaSession.Delegate {
+            override fun onActivated(s: GeckoSession, mediaSession: MediaSession) {
+                android.util.Log.d("WBMedia", "activated")
+                activeMediaSession = mediaSession
+            }
+            override fun onDeactivated(s: GeckoSession, mediaSession: MediaSession) {
+                android.util.Log.d("WBMedia", "deactivated")
+                if (activeMediaSession === mediaSession) activeMediaSession = null
+                isPlayingMedia = false
+                host.onMediaChanged(this@BrowserTab)
+            }
+            override fun onMetadata(s: GeckoSession, mediaSession: MediaSession, meta: MediaSession.Metadata) {
+                mediaTitle = meta.title ?: ""
+            }
+            override fun onPlay(s: GeckoSession, mediaSession: MediaSession) {
+                android.util.Log.d("WBMedia", "onPlay")
+                isPlayingMedia = true
+                host.onMediaChanged(this@BrowserTab)
+            }
+            override fun onPause(s: GeckoSession, mediaSession: MediaSession) {
+                android.util.Log.d("WBMedia", "onPause")
+                isPlayingMedia = false
+                host.onMediaChanged(this@BrowserTab)
+            }
+            override fun onStop(s: GeckoSession, mediaSession: MediaSession) {
+                android.util.Log.d("WBMedia", "onStop")
+                isPlayingMedia = false
+                host.onMediaChanged(this@BrowserTab)
+            }
+        }
+
+        // Toolbar auto-hide on scroll (every page, like Chrome/Brave): report scroll deltas to the
+        // host, which shows/hides the address bar and bottom toolbar accordingly.
+        session.scrollDelegate = object : GeckoSession.ScrollDelegate {
+            override fun onScrollChanged(s: GeckoSession, scrollX: Int, scrollY: Int) {
+                val dy = scrollY - lastScrollY
+                lastScrollY = scrollY
+                host.onContentScroll(this@BrowserTab, dy, scrollY)
+            }
         }
 
         session.progressDelegate = object : GeckoSession.ProgressDelegate {
@@ -114,6 +200,7 @@ class BrowserTab(private val host: TabHost, val isPrivate: Boolean) {
             ) {
                 url = u ?: ""
                 if (isNewTab) { title = ""; secure = null }
+                lastScrollY = 0
                 Tracker.onLocation(this@BrowserTab, url)
                 host.onTabChanged(this@BrowserTab)
             }
@@ -162,7 +249,11 @@ class BrowserTab(private val host: TabHost, val isPrivate: Boolean) {
         session.reload()
     }
 
-    fun close() { Tracker.onTabClosed(this); if (session.isOpen) session.close() }
+    fun close() {
+        Tracker.onTabClosed(this)
+        if (isPlayingMedia) { isPlayingMedia = false; host.onMediaChanged(this) }
+        if (session.isOpen) session.close()
+    }
 
     companion object {
         private val WEB_SCHEMES = setOf("http", "https", "about", "data", "blob", "file", "resource", "moz-extension", "view-source")

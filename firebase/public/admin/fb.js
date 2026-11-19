@@ -3,7 +3,7 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
 import { getAuth, connectAuthEmulator, signInWithEmailAndPassword, signOut, onAuthStateChanged, EmailAuthProvider, reauthenticateWithCredential, updatePassword, sendPasswordResetEmail }
   from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
-import { getFirestore, connectFirestoreEmulator, collection, collectionGroup, query, where, orderBy, limit, startAfter, getDocs, getDoc, doc, updateDoc, setDoc, writeBatch, addDoc, getCountFromServer }
+import { getFirestore, connectFirestoreEmulator, collection, collectionGroup, query, where, orderBy, limit, startAfter, getDocs, getDoc, doc, updateDoc, setDoc, writeBatch, addDoc, getCountFromServer, onSnapshot }
   from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 import config from './firebase-config.js';
 
@@ -59,8 +59,24 @@ async function cached(key, fn, ttl = 6000) {
 }
 const bust = () => cache.clear();
 export const refreshData = () => cache.clear();
+// Presence (online/offline) changes far more often than history, so it gets its own, un-cached cache key.
+export const bustUsers = () => cache.delete('users');
 
 const users = () => cached('users', async () => (await getDocs(collection(db, 'users'))).docs.map((d) => ({ uid: d.id, ...d.data() })));
+
+/**
+ * Live presence: the phone app writes `online` + `lastSeen` on the user document the instant it is
+ * foregrounded/backgrounded (see Cloud.setOnline in the app), so a Firestore realtime listener here
+ * reflects it within about a second - no polling, no manual refresh. Returns an unsubscribe function.
+ */
+export function watchPresence(cb) {
+  if (!configured() || !me) return () => {};
+  return onSnapshot(collection(db, 'users'), (snap) => {
+    const map = {};
+    snap.forEach((d) => { const u = d.data(); map[d.id] = { online: u.online === true, lastSeen: ts(u.lastSeen) }; });
+    cb(map);
+  }, () => {});
+}
 // Per-user queries (default single-field indexes): no collection-group index is needed.
 const rangeDocs = (group, field, from, to) => cached(`${group}:${from}:${to}`, async () => {
   const us = await users(); const out = [];
@@ -149,7 +165,7 @@ export async function api(path, opts = {}) {
   }
   if (!me) throw err('unauthorized');
 
-  const view0 = (u) => ({ id: u.uid, code: u.userId, name: u.name, email: u.email || null, last_seen: ts(u.lastSeen) || null, status: u.status });
+  const view0 = (u) => ({ id: u.uid, code: u.userId, name: u.name, email: u.email || null, last_seen: ts(u.lastSeen) || null, online: u.online === true, status: u.status });
   // ----- aggregates -----
   if (pathname === '/overview') {
     const [visits, sess, us] = await Promise.all([rangeDocs('visits', 'visitedAt', from, to), rangeDocs('sessions', 'startedAt', from, to), users()]);
@@ -200,7 +216,7 @@ export async function api(path, opts = {}) {
 
   // ----- users -----
   const view = (u) => ({ id: u.uid, code: u.userId, name: u.name, email: u.email || null, google_name: u.googleName || null, created_at: ts(u.createdAt), last_seen: ts(u.lastSeen) || null,
-    status: u.status, search_consent: u.searchConsent ? 1 : 0, activity_consent: u.activityConsent ? 1 : 0, device_model: u.device?.model, os_version: u.device?.os, app_version: u.device?.appVersion,
+    online: u.online === true, status: u.status, search_consent: u.searchConsent ? 1 : 0, activity_consent: u.activityConsent ? 1 : 0, device_model: u.device?.model, os_version: u.device?.os, app_version: u.device?.appVersion,
     manufacturer: u.device?.manufacturer, sdk: u.device?.sdk, locale: u.locale, timezone: u.timezone, name_source: u.nameSource });
 
   if (pathname === '/users' && method === 'GET') {
