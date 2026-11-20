@@ -1,0 +1,2 @@
+# the living context file is edited on several branches at once: keep both sides when they merge
+HANDOFF.md merge=union

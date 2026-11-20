@@ -44,3 +44,6 @@ The earlier Flutter prototype and the Node/SQLite backend were removed (still in
 ## Accounts, new computers and cleanup
 - Work from any computer, owner-account recovery (emailed sign-in link) and how to remove everything from a work PC: `docs/SETUP_AND_CLEANUP.md`.
 - `mybrowser.server@gmail.com` is the one permanent superadmin. If its sign-in is ever deleted, open the web admin and tap **Locked out? Email me a sign-in link**.
+
+## Working notes
+`HANDOFF.md` (repository root) is the living context for the current work: what is being built, what is done, the rules, and how to add browser or admin features. Update it after every change.
