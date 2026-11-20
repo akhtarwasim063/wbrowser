@@ -546,3 +546,47 @@ nav{position:sticky}
 .dico .ic{width:26px;height:26px}
 .row2{display:flex;gap:10px;width:100%;margin-top:4px}
 .row2 button{flex:1;justify-content:center;min-height:48px;border-radius:14px}
+
+/* =====================================================================
+   Login screen (own rules, loaded last so they win over the glass styles above).
+   - the form is a solid card, so text stays sharp over the moving background
+   - every grid column can shrink (minmax(0,..)): nothing overflows on narrow screens
+   - fields are 16px (no zoom on phones), 48px tall; labels and hints are readable
+   - phones and tablets: compact brand header on top, form below
+   ===================================================================== */
+/* solid colours for the login card: the theme's own --card/--soft/--line are see-through glass */
+:root{--acard:#ffffff;--afield:#f3f4fc;--aline:#cfd3ec;--aink:#12141f;--amut:#566078}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--acard:#131828;--afield:#1b2140;--aline:#3a4268;--aink:#eef0f8;--amut:#a9b3cb}}
+:root[data-theme="dark"]{--acard:#131828;--afield:#1b2140;--aline:#3a4268;--aink:#eef0f8;--amut:#a9b3cb}
+.auth{min-height:100vh;min-height:100dvh;width:100%;overflow-x:hidden;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr)}
+.auth .art{min-width:0;padding:clamp(24px,5vw,56px)}
+.auth .art h2{font-size:clamp(24px,3.2vw,34px);overflow-wrap:break-word;text-shadow:0 1px 12px rgba(20,16,80,.25)}
+.auth .art p,.auth .art li{opacity:1;font-size:15px;line-height:1.55;color:#fff;overflow-wrap:break-word}
+.auth .pane{min-width:0;padding:clamp(18px,4vw,40px) clamp(14px,4vw,32px)}
+.auth form{
+  max-width:420px;padding:clamp(20px,4vw,32px);gap:14px;border-radius:22px;
+  background:var(--acard)!important;border:1px solid var(--aline)!important;box-shadow:0 18px 44px -18px rgba(40,40,120,.35)!important;
+  -webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+.auth form>*{min-width:0}
+.auth form h1{font-size:clamp(23px,6vw,29px);line-height:1.15;margin:0;color:var(--aink)}
+.auth form .subtitle{color:var(--amut);font-size:14.5px;line-height:1.5;margin:0 0 4px}
+.auth label{font-size:14px;font-weight:650;color:var(--aink);margin-bottom:6px}
+.auth input{font-size:16px;min-height:48px;padding:10px 14px;border-radius:12px;color:var(--aink);background:var(--afield);border:1.5px solid var(--aline)}
+.auth input::placeholder{color:var(--amut);opacity:.9}
+.auth input:focus{border-color:var(--pri);outline:3px solid color-mix(in srgb,var(--pri) 28%,transparent);outline-offset:0}
+.auth button.pri{min-height:50px;font-size:16px;border-radius:14px;width:100%}
+.auth button.link{width:100%;min-height:40px;font-size:14px;color:var(--pri);white-space:normal;text-align:center}
+.auth .err{font-size:14px;line-height:1.45;color:var(--bad);background:var(--bad-soft);border:1px solid color-mix(in srgb,var(--bad) 35%,transparent);margin:0}
+.auth .notice{font-size:13px;line-height:1.45;color:var(--amut)}
+
+@media (max-width:860px){
+  .auth{display:flex;flex-direction:column}
+  .auth .art{flex:none;padding:20px 20px 28px;gap:10px;justify-content:flex-start;border-radius:0 0 26px 26px}
+  .auth .art h2{font-size:22px;margin:0 0 6px;max-width:none}
+  .auth .art p{font-size:14px;max-width:none}
+  .auth .art ul{display:none}
+  .auth .pane{flex:1;place-items:start center;padding:22px 16px 32px;margin-top:-14px;position:relative}
+  .auth form{max-width:440px}
+}
+@media (max-width:380px){.auth form{padding:18px 14px;border-radius:18px}}
+@media (max-height:520px) and (min-width:861px){.auth .art ul{display:none}}
