@@ -43,7 +43,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import dev.wbrowser.admin.BuildConfig
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -159,6 +165,9 @@ private fun SettingsScreen(vm: AdminViewModel, me: Me) {
     val defRange by vm.defaultRange.collectAsState()
     val auto by vm.autoRefresh.collectAsState()
     var askOut by remember { mutableStateOf(false) }
+    val ctx = LocalContext.current
+    val open = rememberOpenLink()
+    val webUrl = "https://"+BuildConfig.FIREBASE_PROJECT_ID+".web.app/admin/"
     val p = palette()
     ScreenScaffold("Settings", "Appearance, access and account", refreshing = false, onRefresh = null) {
         item("account") {
@@ -195,6 +204,22 @@ private fun SettingsScreen(vm: AdminViewModel, me: Me) {
         }
         item("analytics") {
             Reveal(2) { AdminCard { Column { CardTitle("Analytics"); NavRow("clock", "Sessions", "How often and how long the browser is used") { vm.push(Route.Sessions) } } } }
+        }
+        item("web") {
+            Reveal(3) {
+                AdminCard {
+                    Column {
+                        CardTitle("Web console", "The same admin, in your browser.")
+                        NavRow("globe", "Open web admin", webUrl.removePrefix("https://")) { open(webUrl) }
+                        Row(Modifier.padding(top = 6.dp)) {
+                            GlassButton("Copy link", "list") {
+                                (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Admin web console", webUrl))
+                                Toast.makeText(ctx, "Link copied", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                }
+            }
         }
         if (me.can("manage_config") || me.can("manage_admins") || me.can("audit") || me.can("server_info")) item("manage") {
             Reveal(3) {
