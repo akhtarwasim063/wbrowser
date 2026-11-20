@@ -14,4 +14,19 @@
     <color name="wb_danger">#DC2626</color>
     <color name="wb_private">#7C3AED</color>
     <color name="white">#FFFFFF</color>
+    <!-- water-crystal glass (same look as the admin app) -->
+    <color name="wb_glass">#A3FFFFFF</color>
+    <color name="wb_glass_rim">#F2FFFFFF</color>
+    <color name="wb_glass_rim_dim">#2E5B5BF0</color>
+    <color name="wb_bg_top">#FFEAF0FF</color>
+    <color name="wb_bg_mid">#FFF3EEFF</color>
+    <color name="wb_bg_bottom">#FFE6FAFF</color>
+    <color name="wb_orb_a">#887C83FF</color>
+    <color name="wb_orb_a_clear">#007C83FF</color>
+    <color name="wb_orb_b">#6622D3EE</color>
+    <color name="wb_orb_b_clear">#0022D3EE</color>
+    <color name="wb_orb_c">#66F0A6FF</color>
+    <color name="wb_orb_c_clear">#00F0A6FF</color>
+    <color name="wb_wave">#405BC8FF</color>
+    <color name="wb_wave2">#308B5CF6</color>
 </resources>

@@ -6,7 +6,6 @@ import android.text.InputType
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.Toast
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
 /**
  * First install: ask for a name. It is optional. If left empty the app uses, in order:
@@ -22,35 +21,31 @@ object NameDialog {
             setSingleLine(); filters = arrayOf(InputFilter.LengthFilter(80))
         }
         val holder = FrameLayout(activity).apply { setPadding(pad, pad / 2, pad, 0); addView(input) }
-        val builder = MaterialAlertDialogBuilder(activity)
+        val builder = SheetBuilder(activity)
             .setTitle("Welcome to WBrowser")
             .setMessage("What is your name? Leave it empty to use your phone's name.")
             .setView(holder)
             .setCancelable(false)
-            .setPositiveButton("Continue", null)
-        if (GoogleLink.available) builder.setNeutralButton("Use Google", null)
-        val dialog = builder.create()
-        dialog.setOnShowListener {
-            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            .keepOpen()
+            .setPositiveButton("Continue") { d, _ ->
                 val typed = input.text.toString().trim()
                 if (typed.isNotEmpty()) Account.enroll(typed, shareActivity = true, shareSearch = true, source = "typed")
                 else {
                     val device = NameResolver.fromDevice(activity)
                     Account.enroll(device.orEmpty(), shareActivity = true, shareSearch = true, source = "device-name")  // empty => guest
                 }
-                dialog.dismiss(); onDone()
+                d.dismiss(); onDone()
             }
-            if (GoogleLink.available) dialog.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
-                GoogleLink.signIn(activity) { r ->
-                    r.onSuccess { id ->
-                        Account.enroll(id.name.orEmpty(), shareActivity = true, shareSearch = true, source = "google")
-                        GoogleLink.link(id) { l -> l.onFailure { Toast.makeText(activity, "Could not link Google now: ${it.message}", Toast.LENGTH_LONG).show() } }
-                        dialog.dismiss(); onDone()
-                    }.onFailure { Toast.makeText(activity, "Google sign-in cancelled", Toast.LENGTH_SHORT).show() }
-                }
+        if (GoogleLink.available) builder.setNeutralButton("Use Google") { d, _ ->
+            GoogleLink.signIn(activity) { r ->
+                r.onSuccess { id ->
+                    Account.enroll(id.name.orEmpty(), shareActivity = true, shareSearch = true, source = "google")
+                    GoogleLink.link(id) { l -> l.onFailure { Toast.makeText(activity, "Could not link Google now: ${it.message}", Toast.LENGTH_LONG).show() } }
+                    d.dismiss(); onDone()
+                }.onFailure { Toast.makeText(activity, "Google sign-in cancelled", Toast.LENGTH_SHORT).show() }
             }
         }
-        dialog.show()
+        builder.show()
     }
 }
 

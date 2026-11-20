@@ -15,7 +15,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.appbar.MaterialToolbar
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import java.text.DateFormat
 import java.util.Date
 
@@ -63,7 +62,7 @@ class HistoryActivity : AppCompatActivity() {
             // disappear against a dark toolbar in dark mode.
             tb.menu.add("Clear all").setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS or android.view.MenuItem.SHOW_AS_ACTION_WITH_TEXT)
             tb.setOnMenuItemClickListener {
-                MaterialAlertDialogBuilder(this).setTitle("Clear all history?")
+                SheetBuilder(this).setTitle("Clear all history?").danger()
                     .setMessage("This also removes it from your synced devices.")
                     .setPositiveButton("Clear") { _, _ -> HistoryDb.clearAll() }
                     .setNegativeButton("Cancel", null).show()

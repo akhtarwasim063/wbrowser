@@ -15,7 +15,7 @@
         <item name="colorOutline">@color/wb_outline</item>
         <item name="colorOutlineVariant">@color/wb_outline</item>
         <item name="android:colorBackground">@color/wb_bg</item>
-        <item name="android:windowBackground">@color/wb_bg</item>
+        <item name="android:windowBackground">@drawable/bg_crystal</item>
         <item name="preferenceTheme">@style/PreferenceThemeOverlay</item>
     </style>
     <style name="WB.Icon" parent="">

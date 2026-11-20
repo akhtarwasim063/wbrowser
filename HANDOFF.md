@@ -3,7 +3,7 @@
 > **Read this first. Update it after EVERY change.** It exists so that if a session, a PC or an assistant is lost, a new one can open this file and know
 > what was being done, what is finished, what is left, how to do it and which rules apply. Keep it truthful and short per entry.
 
-Last updated: 2026-11-20 (playback branch: MediaSession + PiP video-only layout implemented, phone check of lock screen pending; see section 10)
+Last updated: 2026-11-20 (all three streams implemented and tested on the phone; playing in the background works, glass UI, sheets and exit prompt done. Open: lock-screen UI check, ad shield v2, settings screens restyle)
 
 ---------------------------------------------------------------------------------------------------
 
@@ -155,35 +155,41 @@ Legend: `[ ]` todo, `[~]` in progress / partly done, `[x]` done and tested on th
 
 ### 6.U  UI  (branch `feature/browser-ui`)
 Goal: the browser looks and feels like the new admin app: crystal/glass, compact, smooth, with working light and dark.
-- [ ] U1 Design tokens: add the admin palette (light + dark) to `res/values/colors.xml`, `res/values-night/colors.xml`, `themes.xml`.
-- [ ] U2 Glass surfaces for address bar, bottom bar, menu sheet and shield sheet (translucent fill, bright rim stroke, soft shadow; real blur only where supported).
-- [ ] U3 New-tab page (`assets/newtab.html`): crystal background, search box, quick links, light/dark aware.
-- [ ] U4 Tab switcher: tidy cards, previews, open/close animations.
+- [x] U1 Design tokens: glass and crystal colours (light + dark) in `res/values/colors.xml` and `values-night/colors.xml` (`wb_glass*`, `wb_bg_*`, `wb_orb_*`, `wb_wave*`).
+- [~] U2 Glass surfaces: crystal background (gradient, orbs, water waves) behind the whole app, glass address pill, floating glass bottom bar, glass find bar, glass tab cards, bottom-sheet surface. VERIFIED on the phone (dark). Still to do: menu and shield sheet rows, light mode check.
+- [ ] U3 New-tab page (`assets/newtab.html`): crystal background, glass search box and tiles (it is already dark-aware but not glass yet).
+- [~] U4 Tab switcher: crystal background, glass cards, pop in/out animation (`Motion.kt`). Previews/animations of single cards still open.
 - [ ] U5 Settings, Account, History, Privacy screens restyled to match (same cards, spacing, headers).
-- [ ] U6 Motion: press feedback/ripples, sheet transitions, toolbar hide/show easing (keep 60 fps).
-- [ ] U7 Theme switch (Auto/Light/Dark) verified everywhere, status/navigation bar icons follow the theme, edge-to-edge correct.
+- [~] U6 Motion: springy press feedback on the toolbar buttons (`pressFx`), tab switcher pop in/out, sheets slide. Bar hide/show is still an instant layout change (see Known issues).
+- [~] U7 Theme switch: dark verified on the phone; light mode and the Auto switch not yet looked at by eye.
+Acceptance: screenshots on the phone in light and dark; no text unreadable on glass; no jank when scrolling a page.
+
+- [x] U8 Every confirmation / message / prompt / chooser is a bottom sheet (`Sheets.kt` `SheetBuilder`, same API as AlertDialog.Builder; includes JS alert/confirm/prompt, permission prompts, long-press menu, name dialog). Back on the last tab asks "Exit WBrowser?" (Stay / Exit, plus "Keep playing in background" while media plays). VERIFIED on the phone.
 Acceptance: screenshots on the phone in light and dark; no text unreadable on glass; no jank when scrolling a page.
 
 ### 6.P  Playback: foreground and background  (branch `feature/browser-playback`)
 Goal: audio/video keeps playing when the app is in the background or the screen is off, with proper controls, and resumes correctly.
 - [x] P1 Baseline on the phone (2026-11-20). Findings: (a) in PiP the window showed the whole YouTube page, not the video; (b) `dumpsys media_session` had 0 sessions, so no lock-screen/notification controls were possible; (c) YouTube paused itself ~30 ms after every resume (play/pause ping-pong in `adb logcat -s WBMedia`); (d) the old keepalive.js and youtube.js injected an inline script, which YouTube's CSP blocks, so they probably never worked on YouTube; (e) a plain audio test page (`native_android/tools/bgtest`) keeps playing through Home and screen-off with `document.hidden=false` the whole time.
-- [~] P2 Real media notification. DONE in code: MediaSession + MediaStyle notification (title/artist/album/artwork, play/pause, seek bar, back/forward 10 s, previous/next when the page offers them, stop). Verified: `dumpsys media_session` shows `WBrowserMedia` PLAYING actions=847. STILL TO CHECK BY EYE: notification shade and lock screen UI and the button presses (the phone locked itself during the test, see Known issues).
+- [~] P2 Real media notification: MediaSession + MediaStyle notification (title/artist/artwork, play/pause, seek, back/forward 10 s, previous/next when offered, stop). VERIFIED: `dumpsys media_session` shows it PLAYING; media keys (`adb shell cmd media_session dispatch pause|play|fast-forward`) pause, resume and seek the page (fast-forward moved +10 s), which is the same path the lock screen, notification buttons and Bluetooth use. Notification record: category transport, visibility PUBLIC. STILL TO CHECK BY EYE: the lock-screen card (needs the owner to lock the phone).
 - [~] P3 Audio focus (pause on loss, resume after a short loss) and pause when headphones are unplugged: implemented in `MediaPlaybackService`, not tested yet (needs a call or another player).
 - [~] P4 Service hardening: wake lock and Wi-Fi lock only while playing, notification detaches when paused, auto-stop after 15 min paused. Android 14+ foreground-service timeouts not verified.
-- [~] P5 Resume logic: retries cut to two (350 / 1200 ms) and never override a user pause (6 s guard). The ROOT CAUSE of YouTube pausing itself in the background is NOT found yet (see Known issues).
-- [~] P6 PiP: video-only layout in the mini-player (VERIFIED on the phone: the window shows only the video), aspect ratio from the video size, auto-enter on Android 12+, back/play-pause/forward buttons in the PiP window, closing the window pauses. The PiP buttons and auto-enter still need a tap test.
+- [x] P5 Resume logic: ROOT CAUSE FOUND AND FIXED. YouTube's MOBILE site pauses itself the moment the app leaves the screen (and again right after every resume). Its DESKTOP site does not. YouTube now loads with the desktop user agent (Tabs.kt `setYoutubeAgent`, setting `yt_desktop`, default on) and plays on through Home, PiP and the lock state with no play/pause ping-pong (30 s test: no pause event until we sent one). Retries are cut to two and never override a user pause.
+- [~] P6 PiP: video-only layout (VERIFIED: only the video shows and it keeps playing), aspect ratio from the video size, auto-enter on Android 12+, play/pause/back/forward buttons, closing the window pauses. Buttons in the PiP window still need a finger tap test.
 - [ ] P7 Aggressive battery managers (ColorOS/MIUI etc.): optional prompt to exclude the app from battery optimisation, with a short explanation screen.
 - [~] P8 Settings: "Auto mini-player" (`auto_pip`) added next to "Play video and audio in the background" (`bg_playback`). Wording/other toggles still open.
 Acceptance: YouTube plays with screen locked for 10+ minutes; notification controls work from the lock screen; a phone call pauses and playback resumes after; PiP controls work.
 
 ### 6.Y  YouTube  (branch `feature/browser-youtube`)
 Goal: YouTube pages are ad-free as far as possible, background/PiP friendly and comfortable to use. (Depends on P for background behaviour.)
-- [ ] Y1 Baseline on the phone: note which ads still appear (pre-roll, mid-roll, banner/overlay, Shorts, skippable button) with uBlock on/off and shield on/off.
-- [ ] Y2 Ad shield v2 in `wbshield/youtube.js`: also cover `fetch`/XHR bodies for `/youtubei/v1/player` and `/next`, `ytInitialData` ad slots, auto-click skip buttons, jump to end of an `.ad-showing` video, hide ad containers with CSS. Keep it behind the `youtube_shield` setting.
-- [ ] Y3 Background play for YouTube verified end to end together with P2/P5 (title and artwork in the notification come from YouTube's metadata).
-- [ ] Y4 Playback comfort: remember position, autoplay behaviour, fullscreen/PiP transitions, handle `m.youtube.com`, `music.youtube.com`, `youtube.com/shorts`.
+- [~] Y1 Baseline: with the desktop site the page shows ads only where uBlock Origin lets them through; a proper ad count over a 20-minute session is still to do.
+- [ ] Y2 Ad shield v2 in `wbshield/youtube.js`: it still injects an inline script, which YouTube's CSP blocks, so it does nothing. Rewrite with `wrappedJSObject` / `exportFunction` like `keepalive.js`; also auto-skip and hide ad containers. (uBlock Origin is the main protection meanwhile.)
+- [x] Y3 Background play for YouTube verified end to end (desktop site, MediaSession notification, PiP video-only). Title/artwork in the notification come from YouTube's metadata.
+- [~] Y4 Playback comfort: VERIFIED full screen (landscape, no bars, camera cut-out used, portrait restored on exit; `MainActivity.edgeToEdge`) and toolbar hide on scroll down / show on scroll up (thresholds 70 / 45 px). Still open: remember position, `music.youtube.com` and Shorts behaviour.
 - [ ] Y5 Quick access: YouTube shortcut on the new-tab page and an optional "YouTube mode" (mobile site default, immersive fullscreen).
 - [ ] Y6 Resilience: a way to ship selector/script fixes without a full app release (for example via `Remote.kt` remote config), because YouTube changes often.
+Acceptance: no video ads in a 20-minute session on the phone, background and PiP keep playing, the setting really turns the shield off.
+
+- [x] Y7 YouTube desktop layout fits the phone: `wbplayback/ytviewport.js` sets a 480 px viewport on youtube.com so the desktop page is not wider than the screen. VERIFIED on the phone.
 Acceptance: no video ads in a 20-minute session on the phone, background and PiP keep playing, the setting really turns the shield off.
 
 ### 6.F  Other browser features  (branch `feature/browser-features`, not started)
@@ -223,7 +229,9 @@ Document the field in `firebase/README.md` (data model) and in the log here. Rol
 ---------------------------------------------------------------------------------------------------
 
 ## 8. Known issues and open questions (keep short)
-- **OPEN, most important: YouTube (m.youtube.com) pauses itself right after leaving the app, and again ~30 ms after every resume.** A plain `<audio>` page does NOT (it plays through Home and screen-off), so the cause is YouTube-specific or video-specific. Next step: turn on `WB_DEBUG` in `keepalive.js` (see section 4) and read which events reach the page right before the pause (`visibilitychange`, `blur`, `pagehide`...). Note that `blur` events still reached the page in the test, so the blur swallowing in `keepalive.js` is not effective (investigate: maybe `e.target` comparison across the Xray wrapper).
+- **RESOLVED (kept for the record): YouTube (m.youtube.com) paused itself right after leaving the app, and again ~30 ms after every resume.** Fix: desktop site for YouTube (P5). Original notes: A plain `<audio>` page does NOT (it plays through Home and screen-off), so the cause is YouTube-specific or video-specific. Next step: turn on `WB_DEBUG` in `keepalive.js` (see section 4) and read which events reach the page right before the pause (`visibilitychange`, `blur`, `pagehide`...). Note that `blur` events still reached the page in the test, so the blur swallowing in `keepalive.js` is not effective (investigate: maybe `e.target` comparison across the Xray wrapper).
+- Bars hide and show with an instant layout change, so the page area jumps by the bar height (acceptable for now; a smoother way is `GeckoSession.setDynamicToolbarMaxHeight` + `GeckoView.setVerticalClipping`).
+- Auto-rotate off: leaving full screen restores portrait explicitly (`wasPortraitBeforeFullscreen`); with auto-rotate off `SCREEN_ORIENTATION_UNSPECIFIED` alone would leave the phone in landscape.
 - `youtube.js` (ad shield) still injects an inline script, which YouTube's CSP blocks. Rewrite it with `wrappedJSObject` / `exportFunction` like `keepalive.js` (task Y2).
 - Testing on the phone: do NOT send `KEYCODE_SLEEP` (screen off) from adb unless the owner is ready to unlock: it locks the phone and the tests cannot continue. Never unlock the phone programmatically. Ask the owner to unlock and keep it awake (Settings > Display > screen timeout).
 - A screenshot of a video surface can look black; judge the PiP window from a screenshot of the launcher while it floats (it shows the real frame).
@@ -238,9 +246,9 @@ Document the field in `firebase/README.md` (data model) and in the log here. Rol
 
 | Stream | Branch | Tasks | Done | Now working on |
 |---|---|---|---|---|
-| UI | `feature/browser-ui` | 7 | 0 | nothing started |
-| Playback | `feature/browser-playback` | 8 | 1 | P2, P6 coded and partly verified; YouTube self-pause root cause open |
-| YouTube | `feature/browser-youtube` | 6 | 0 | nothing started |
+| UI | `feature/browser-ui` | 8 | 3 | U2, U4, U6, U7 partly done; U3 and U5 not started |
+| Playback | `feature/browser-playback` | 8 | 2 | P2, P6 verified apart from lock-screen look and PiP buttons by finger |
+| YouTube | `feature/browser-youtube` | 7 | 2 | Y2 (ad shield v2) |
 | Admin | (per task) | n/a | n/a | idle |
 
 ---------------------------------------------------------------------------------------------------
@@ -253,3 +261,7 @@ Format: `YYYY-MM-DD | branch | task | what changed (files) | tested how | commit
 2026-11-20 | feature/browser-playback | P1 | baseline on phone: PiP showed the whole page, 0 media sessions, YouTube self-pauses, old scripts blocked by CSP | adb + screenshots + dumpsys | n/a
 2026-11-20 | feature/browser-playback | P2,P3,P4 | MediaPlaybackService rewritten: MediaSession + MediaStyle notification, audio focus, noisy receiver, wake+wifi lock; Tabs.kt collects metadata/artwork/position/features and exposes seek/next/prev; MainActivity wires them (refreshMediaSession) | dumpsys media_session shows PLAYING actions=847; UI not yet seen | see git log
 2026-11-20 | feature/browser-playback | P5,P6,P8 | keepalive.js rewritten (CSP-safe via wrappedJSObject, plus PiP video-only layout); PiP params with aspect ratio, actions and auto-enter; auto_pip setting; tools/bgtest | PiP window showed only the video on the phone | see git log
+2026-11-20 | feature/browser-youtube | P5,Y3 | YouTube loads as the desktop site (Tabs.kt onLoadRequest + setYoutubeAgent, pref yt_desktop): background play no longer self-pauses | 30 s Home test: no pause events; media keys pause/play/seek | 6f063a1
+2026-11-20 | feature/browser-youtube | Y4 | real full screen (edgeToEdge: cut-out, landscape for landscape video), quicker toolbar hide thresholds | phone: fullscreen via F key, portrait restored; scroll hides and shows bars | 6f063a1 + next
+2026-11-20 | feature/browser-ui | U1,U2,U4,U6,U8 | glass tokens + crystal background + glass bars/cards; SheetBuilder replaces every dialog; exit confirmation; pressFx/popIn/popOut motion | phone screenshots of the UI, an exit sheet and the PiP | see git log
+2026-11-20 | feature/browser-ui | Y7,Y4 | ytviewport.js fits desktop YouTube to the phone; orientation restore after full screen | phone screenshot | see git log

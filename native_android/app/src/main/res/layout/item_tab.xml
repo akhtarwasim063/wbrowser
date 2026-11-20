@@ -4,10 +4,10 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_margin="6dp"
-    app:cardBackgroundColor="?attr/colorSurfaceContainer"
+    app:cardBackgroundColor="@color/wb_glass"
     app:cardCornerRadius="16dp"
     app:cardElevation="0dp"
-    app:strokeColor="?attr/colorOutline"
+    app:strokeColor="@color/wb_glass_rim"
     app:strokeWidth="1dp">
 
     <LinearLayout

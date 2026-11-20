@@ -10,7 +10,6 @@ import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.color.MaterialColors
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.materialswitch.MaterialSwitch
 
 /**
@@ -85,7 +84,7 @@ class PrivacyActivity : AppCompatActivity() {
             "Waiting to upload: $pending item(s) · last upload: $last" + (Account.lastError?.let { "\n$it" } ?: ""), 13f).apply { setPadding(0, dp(16), 0, dp(8)) })
 
         box.addView(outlined("What is collected?") {
-            MaterialAlertDialogBuilder(this).setTitle("Privacy notice").setMessage(PrivacyNotice.TEXT).setPositiveButton("OK", null).show()
+            SheetBuilder(this).setTitle("Privacy notice").setMessage(PrivacyNotice.TEXT).setPositiveButton("OK", null).show()
         })
         // full policy / terms are public pages on our Firebase Hosting site
         Cloud.siteUrl()?.let { site ->
@@ -98,7 +97,7 @@ class PrivacyActivity : AppCompatActivity() {
             text = "Delete my data and leave"
             setTextColor(getColor(R.color.wb_danger))
             setOnClickListener {
-                MaterialAlertDialogBuilder(this@PrivacyActivity).setTitle("Delete everything?")
+                SheetBuilder(this@PrivacyActivity).setTitle("Delete everything?").danger()
                     .setMessage("This stops sharing and permanently deletes your account and all activity stored on the server.")
                     .setPositiveButton("Delete") { _, _ -> Account.requestErasure() }
                     .setNegativeButton("Cancel", null).show()

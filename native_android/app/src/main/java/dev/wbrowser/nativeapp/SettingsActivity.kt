@@ -10,7 +10,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import com.google.android.material.appbar.MaterialToolbar
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import org.mozilla.geckoview.StorageController
 
 class SettingsActivity : AppCompatActivity() {
@@ -63,7 +62,7 @@ class SettingsActivity : AppCompatActivity() {
                 startActivity(Intent(requireContext(), PrivacyActivity::class.java)); true
             }
             findPreference<Preference>("about")?.setOnPreferenceClickListener {
-                MaterialAlertDialogBuilder(requireContext()).setTitle("WBrowser 1.0")
+                SheetBuilder(requireContext()).setTitle("WBrowser 1.0")
                     .setMessage("A private, ad-free browser.\n\nEngine: Gecko (Mozilla)\nAd blocking: uBlock Origin + built-in shields")
                     .setPositiveButton("OK", null).show()
                 true
@@ -73,7 +72,7 @@ class SettingsActivity : AppCompatActivity() {
         private fun showClearDialog() {
             val labels = arrayOf("Browsing history", "Cookies and site data", "Cached images and files")
             val checked = booleanArrayOf(true, true, true)
-            MaterialAlertDialogBuilder(requireContext()).setTitle("Clear browsing data")
+            SheetBuilder(requireContext()).setTitle("Clear browsing data").danger()
                 .setMultiChoiceItems(labels, checked) { _, i, c -> checked[i] = c }
                 .setPositiveButton("Clear") { _, _ ->
                     if (checked[0]) HistoryDb.clearAll()

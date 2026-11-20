@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- two soft water waves along the bottom of the crystal background -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="600dp" android:height="110dp" android:viewportWidth="600" android:viewportHeight="110">
+    <path android:fillColor="@color/wb_wave" android:pathData="M0,40 C100,10 200,70 300,40 S500,10 600,40 V110 H0 Z"/>
+    <path android:fillColor="@color/wb_wave2" android:pathData="M0,64 C75,84 225,34 300,64 S525,84 600,64 V110 H0 Z"/>
+</vector>

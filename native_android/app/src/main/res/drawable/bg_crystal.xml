@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- the scene behind the browser chrome: gradient, soft light orbs and water -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient android:angle="270" android:startColor="@color/wb_bg_top" android:centerColor="@color/wb_bg_mid" android:endColor="@color/wb_bg_bottom"/>
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <gradient android:type="radial" android:gradientRadius="75%p" android:centerX="0.18" android:centerY="0.12" android:startColor="@color/wb_orb_a" android:endColor="@color/wb_orb_a_clear"/>
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <gradient android:type="radial" android:gradientRadius="70%p" android:centerX="0.9" android:centerY="0.45" android:startColor="@color/wb_orb_b" android:endColor="@color/wb_orb_b_clear"/>
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <gradient android:type="radial" android:gradientRadius="80%p" android:centerX="0.3" android:centerY="0.85" android:startColor="@color/wb_orb_c" android:endColor="@color/wb_orb_c_clear"/>
+        </shape>
+    </item>
+    <item android:gravity="bottom|fill_horizontal" android:height="110dp" android:drawable="@drawable/ic_wave"/>
+</layer-list>

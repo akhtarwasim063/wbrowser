@@ -10,7 +10,6 @@ import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.color.MaterialColors
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
 /**
  * Account: just identity. Your name and (optionally) Google sign-in. Everything about activity
@@ -78,7 +77,7 @@ class AccountActivity : AppCompatActivity() {
         box.addView(label("User ID: ${Account.userId}", 13f))
         box.addView(outlined("Change name") {
             val input = EditText(this).apply { setText(Account.name); setSingleLine() }
-            MaterialAlertDialogBuilder(this).setTitle("Your name").setView(input)
+            SheetBuilder(this).setTitle("Your name").setView(input)
                 .setPositiveButton("Save") { _, _ -> input.text.toString().trim().takeIf { it.isNotEmpty() }?.let { Account.setName(it) } }
                 .setNegativeButton("Cancel", null).show()
         })

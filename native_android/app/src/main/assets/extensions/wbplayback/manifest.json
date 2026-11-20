@@ -10,6 +10,12 @@
       "js": ["keepalive.js"],
       "run_at": "document_start",
       "all_frames": true
+    },
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["ytviewport.js"],
+      "run_at": "document_start",
+      "all_frames": false
     }
   ]
 }

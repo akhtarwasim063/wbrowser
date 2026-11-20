@@ -49,7 +49,6 @@ import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.chip.Chip
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.progressindicator.LinearProgressIndicator
@@ -181,6 +180,8 @@ class MainActivity : AppCompatActivity(), TabHost {
         btnShowBars = findViewById(R.id.btnShowBars)
         btnPip.setOnClickListener { enterMiniPlayer() }
         btnShowBars.setOnClickListener { setBarsHidden(false) }
+        // springy press feedback on the toolbar buttons
+        listOf(btnBack, btnForward, btnReload, btnShield, btnPip, findViewById<View>(R.id.btnHome), findViewById<View>(R.id.btnTabs), findViewById<View>(R.id.btnMenu)).forEach { it.pressFx() }
     }
 
     private fun applySystemBars() {
@@ -258,9 +259,22 @@ class MainActivity : AppCompatActivity(), TabHost {
             t != null && t.canGoBack -> t.session.goBack()
             t != null && tabs.size > 1 && !t.isNewTab -> closeTab(t)
             t != null && tabs.size > 1 -> closeTab(t)
-            else -> finish()
+            else -> confirmExit()
         }
     }
+
+    /** Back on the last tab: ask before closing. While media plays there is a third choice that keeps it playing in the background. */
+    private fun confirmExit() {
+        if (exitSheet?.isShowing == true) return
+        val playing = tabs.any { it.isPlayingMedia }
+        val b = SheetBuilder(this).setTitle("Exit WBrowser?")
+            .setMessage(if (playing) "Audio or video is playing. Exit stops it, or keep it playing in the background." else "Do you want to close the browser?")
+            .setPositiveButton("Exit") { _, _ -> finish() }
+            .setNegativeButton("Stay", null)
+        if (playing) b.setNeutralButton("Keep playing in background") { _, _ -> moveTaskToBack(true) }
+        exitSheet = b.show()
+    }
+    private var exitSheet: com.google.android.material.bottomsheet.BottomSheetDialog? = null
 
     // ======================= toolbar =======================
     private fun setupToolbar() {
@@ -678,7 +692,7 @@ class MainActivity : AppCompatActivity(), TabHost {
         chipPrivate.isChecked = showingPrivate
         urlBar.clearFocus()
         tabAdapter.refresh()
-        tabSwitcher.visibility = View.VISIBLE
+        tabSwitcher.popIn()
         // refresh the current tab's thumbnail in the background
         if (t != null) gecko.capturePixels().accept({ bmp ->
             if (bmp != null) {
@@ -689,7 +703,7 @@ class MainActivity : AppCompatActivity(), TabHost {
         }, { })
     }
 
-    private fun hideSwitcher() { tabSwitcher.visibility = View.GONE }
+    private fun hideSwitcher() { tabSwitcher.popOut() }
 
     private inner class TabAdapter : RecyclerView.Adapter<TabAdapter.VH>() {
         private var items: List<BrowserTab> = emptyList()
@@ -866,12 +880,18 @@ class MainActivity : AppCompatActivity(), TabHost {
         if (on) root.setPadding(0, 0, 0, 0) else ViewCompat.requestApplyInsets(root)
         val t = current
         val portraitVideo = t != null && t.videoHeight > t.videoWidth && t.videoWidth > 0
-        requestedOrientation = when {
-            !on -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-            portraitVideo -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-            else -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        if (on) {
+            if (!inForcedOrientation) { wasPortraitBeforeFullscreen = resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_LANDSCAPE; inForcedOrientation = true }
+            requestedOrientation = if (portraitVideo) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        } else if (inForcedOrientation) {
+            inForcedOrientation = false
+            // with auto-rotate off, UNSPECIFIED would keep the forced landscape: go back to where the phone was, then let it rotate freely again
+            requestedOrientation = if (wasPortraitBeforeFullscreen) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            ui.postDelayed({ if (!inForcedOrientation) requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }, 700)
         }
     }
+    private var inForcedOrientation = false
+    private var wasPortraitBeforeFullscreen = true
 
     override fun onPopupBlocked(tab: BrowserTab, uri: String) {
         if (tab !== current) return
@@ -898,7 +918,7 @@ class MainActivity : AppCompatActivity(), TabHost {
             labels += "Copy image address"; acts += { copy(src) }
         }
         if (labels.isEmpty()) return
-        MaterialAlertDialogBuilder(this).setTitle(link ?: src)
+        SheetBuilder(this).setTitle(link ?: src)
             .setItems(labels.toTypedArray()) { _, i -> acts[i]() }.show()
     }
 
@@ -929,7 +949,7 @@ class MainActivity : AppCompatActivity(), TabHost {
     override val prompts: GeckoSession.PromptDelegate = object : GeckoSession.PromptDelegate {
         override fun onAlertPrompt(s: GeckoSession, p: GeckoSession.PromptDelegate.AlertPrompt): GeckoResult<PromptResponse> {
             val r = GeckoResult<PromptResponse>()
-            MaterialAlertDialogBuilder(this@MainActivity).setTitle(p.title ?: hostOf(null)).setMessage(p.message)
+            SheetBuilder(this@MainActivity).setTitle(p.title ?: hostOf(null)).setMessage(p.message)
                 .setPositiveButton("OK") { _, _ -> r.complete(p.dismiss()) }
                 .setOnCancelListener { r.complete(p.dismiss()) }.show()
             return r
@@ -937,7 +957,7 @@ class MainActivity : AppCompatActivity(), TabHost {
 
         override fun onButtonPrompt(s: GeckoSession, p: GeckoSession.PromptDelegate.ButtonPrompt): GeckoResult<PromptResponse> {
             val r = GeckoResult<PromptResponse>()
-            MaterialAlertDialogBuilder(this@MainActivity).setTitle(p.title ?: "Confirm").setMessage(p.message)
+            SheetBuilder(this@MainActivity).setTitle(p.title ?: "Confirm").setMessage(p.message)
                 .setPositiveButton("OK") { _, _ -> r.complete(p.confirm(GeckoSession.PromptDelegate.ButtonPrompt.Type.POSITIVE)) }
                 .setNegativeButton("Cancel") { _, _ -> r.complete(p.confirm(GeckoSession.PromptDelegate.ButtonPrompt.Type.NEGATIVE)) }
                 .setOnCancelListener { r.complete(p.dismiss()) }.show()
@@ -947,7 +967,7 @@ class MainActivity : AppCompatActivity(), TabHost {
         override fun onTextPrompt(s: GeckoSession, p: GeckoSession.PromptDelegate.TextPrompt): GeckoResult<PromptResponse> {
             val r = GeckoResult<PromptResponse>()
             val input = EditText(this@MainActivity).apply { setText(p.defaultValue ?: ""); setSingleLine() }
-            MaterialAlertDialogBuilder(this@MainActivity).setTitle(p.title ?: "").setMessage(p.message).setView(input)
+            SheetBuilder(this@MainActivity).setTitle(p.title ?: "").setMessage(p.message).setView(input)
                 .setPositiveButton("OK") { _, _ -> r.complete(p.confirm(input.text.toString())) }
                 .setNegativeButton("Cancel") { _, _ -> r.complete(p.dismiss()) }
                 .setOnCancelListener { r.complete(p.dismiss()) }.show()
@@ -962,7 +982,7 @@ class MainActivity : AppCompatActivity(), TabHost {
             }
             walk(p.choices)
             val labels = flat.map { it.label ?: "" }.toTypedArray()
-            val b = MaterialAlertDialogBuilder(this@MainActivity).setTitle(p.message ?: p.title ?: "")
+            val b = SheetBuilder(this@MainActivity).setTitle(p.message ?: p.title ?: "")
             if (p.type == GeckoSession.PromptDelegate.ChoicePrompt.Type.MULTIPLE) {
                 val checked = BooleanArray(flat.size) { flat[it].selected }
                 b.setMultiChoiceItems(labels, checked) { _, i, c -> checked[i] = c }
@@ -1037,7 +1057,7 @@ class MainActivity : AppCompatActivity(), TabHost {
 
         private fun ask(p: GeckoSession.PermissionDelegate.ContentPermission, what: String): GeckoResult<Int> {
             val r = GeckoResult<Int>()
-            MaterialAlertDialogBuilder(this@MainActivity)
+            SheetBuilder(this@MainActivity)
                 .setTitle(hostOf(p.uri)).setMessage("Allow this site to $what?")
                 .setPositiveButton("Allow") { _, _ -> r.complete(GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW) }
                 .setNegativeButton("Block") { _, _ -> r.complete(GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY) }
@@ -1053,7 +1073,7 @@ class MainActivity : AppCompatActivity(), TabHost {
         ) {
             val what = listOfNotNull(if (!video.isNullOrEmpty()) "camera" else null, if (!audio.isNullOrEmpty()) "microphone" else null)
                 .joinToString(" and ")
-            MaterialAlertDialogBuilder(this@MainActivity)
+            SheetBuilder(this@MainActivity)
                 .setTitle(hostOf(uri)).setMessage("Allow this site to use your $what?")
                 .setPositiveButton("Allow") { _, _ -> cb.grant(video?.firstOrNull(), audio?.firstOrNull()) }
                 .setNegativeButton("Block") { _, _ -> cb.reject() }
