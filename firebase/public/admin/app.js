@@ -127,7 +127,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
   let gid = 0;
   function areaChart(rows, key, label, cls = '') {
     if (!rows.length) return h('div', { class: 'empty' }, 'No data in this range.');
-    const W = 640, H = 200, L = 40, R = 10, T = 12, B = 26;
+    const W = 640, H = 150, L = 40, R = 10, T = 10, B = 24;
     const max = Math.max(1, ...rows.map((r) => r[key] || 0));
     const nice = Math.ceil(max / 4) * 4 || 4;
     const x = (i) => L + (rows.length === 1 ? (W - L - R) / 2 : (i * (W - L - R)) / (rows.length - 1));
@@ -154,7 +154,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
   }
 
   function colChart(rows, key, label, xl) {
-    const W = 640, H = 170, L = 34, B = 24, T = 8;
+    const W = 640, H = 130, L = 34, B = 22, T = 8;
     const max = Math.max(1, ...rows.map((r) => r[key] || 0));
     const bw = (W - L) / rows.length;
     const svg = s('svg', { class: 'chart', viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': label });
@@ -194,6 +194,61 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
   const card = (title, hint, ...body) => h('div', { class: 'card' }, h('h2', {}, title), hint ? h('p', { class: 'hint' }, hint) : h('div', { class: 'hint' }), body);
   const navRow = (href, icon, title, hint) => h('a', { class: 'listrow', href }, h('div', { class: 'badge' }, ico(icon)), h('div', {}, h('b', {}, title), h('div', { class: 'sub' }, hint)), h('span', { class: 'go' }, ico('chev')));
   const searchBox = (placeholder, on) => h('div', { class: 'search' }, ico('search'), h('input', { placeholder, oninput: (e) => on(e.target.value) }));
+
+
+  // ---------- press and hold: select rows, then delete several at once ----------
+  let sel = null, selBar = null;
+  function endSelect() { sel = null; selBar?.remove(); selBar = null; document.querySelectorAll('.overlay').forEach((o) => o.remove()); document.querySelectorAll('.selecting').forEach((e) => e.classList.remove('selecting')); }
+  function updateBar() {
+    if (!selBar) return;
+    selBar.querySelector('b').textContent = sel.size + ' selected';
+    selBar.querySelector('.del').disabled = sel.size === 0;
+  }
+  function openSheet(title, items) {
+    const close = () => ov.remove();
+    const ov = h('div', { class: 'overlay', onclick: (e) => { if (e.target === ov) close(); } },
+      h('div', { class: 'sheet' }, h('div', { class: 't' }, title),
+        items.map(([icon, label, cls, fn]) => btn(icon, label, { class: cls || '', onclick: () => { close(); fn(); } })),
+        h('button', { onclick: close }, 'Cancel')));
+    document.body.append(ov);
+  }
+  function selectable(box, rows, kind, base, reload) {
+    const trs = [...box.querySelectorAll('tbody tr')];
+    const del = async (ids) => {
+      if (!ids.length || !confirm(`Delete ${ids.length} ${ids.length === 1 ? 'entry' : 'entries'}?`)) return;
+      try { await api(`${base}/${kind}`, { method: 'DELETE', body: { ids } }); endSelect(); reload(); } catch (er) { alert(er.message); }
+    };
+    const startSelect = (firstId) => {
+      sel = new Set([firstId]);
+      box.classList.add('selecting');
+      trs.forEach((tr, i) => tr.classList.toggle('picked', rows[i] && sel.has(rows[i].id)));
+      selBar?.remove();
+      selBar = h('div', { class: 'selbar' }, h('b', {}, ''),
+        h('button', { onclick: () => { sel = sel.size === rows.length ? new Set() : new Set(rows.map((r) => r.id)); trs.forEach((tr, i) => tr.classList.toggle('picked', rows[i] && sel.has(rows[i].id))); updateBar(); } }, 'All'),
+        btn('trash', 'Delete', { class: 'bad del', onclick: () => del([...sel]) }),
+        h('button', { onclick: () => { endSelect(); trs.forEach((tr) => tr.classList.remove('picked')); } }, 'Done'));
+      document.body.append(selBar); updateBar();
+    };
+    trs.forEach((tr, i) => {
+      const r = rows[i]; if (!r) return;
+      tr.classList.add('sel-row');
+      let timer = 0, sx = 0, sy = 0, fired = false;
+      const fire = () => {
+        fired = true; navigator.vibrate?.(15);
+        if (sel) { sel.has(r.id) ? sel.delete(r.id) : sel.add(r.id); tr.classList.toggle('picked', sel.has(r.id)); updateBar(); return; }
+        if (!can('delete_data')) return;
+        openSheet(r.title || r.query || r.url || 'Entry', [['check', 'Select multiple', '', () => startSelect(r.id)], ['trash', 'Delete this one', 'bad', () => del([r.id])]]);
+      };
+      tr.addEventListener('pointerdown', (e) => { fired = false; sx = e.clientX; sy = e.clientY; clearTimeout(timer); timer = setTimeout(fire, 450); });
+      tr.addEventListener('pointermove', (e) => { if (Math.abs(e.clientX - sx) > 8 || Math.abs(e.clientY - sy) > 8) clearTimeout(timer); });
+      ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => tr.addEventListener(ev, () => clearTimeout(timer)));
+      tr.addEventListener('contextmenu', (e) => { e.preventDefault(); clearTimeout(timer); fire(); });
+      tr.addEventListener('click', (e) => {
+        if (fired) { fired = false; e.preventDefault(); e.stopPropagation(); return; }
+        if (sel) { e.preventDefault(); e.stopPropagation(); sel.has(r.id) ? sel.delete(r.id) : sel.add(r.id); tr.classList.toggle('picked', sel.has(r.id)); updateBar(); }
+      }, true);
+    });
+  }
 
   // ---------- views ----------
   async function viewOverview(box) {
@@ -313,27 +368,23 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
         const base = `/users/${encodeURIComponent(id)}`;
         if (tab === 'history') {
           const d = await api(`${base}/history?${range()}&q=${encodeURIComponent(q)}&page=${page}&limit=50`);
-          body.replaceChildren(h('div', { class: 'card' }, table([
+          const card = h('div', { class: 'card' }, table([
             { label: 'When', cell: (r) => dt(r.visited_at) },
             { label: 'Page', main: 1, cls: 'url', cell: (r) => h('div', { class: 'who' }, h('div', { class: `av sq ${tone(r.domain)}` }, r.domain[0].toUpperCase()), h('div', {}, extLink(r.url, r.title || r.domain), h('div', { class: 'sub' }, r.url))) },
-            { label: 'Time spent', num: 1, cell: (r) => dur(r.duration_ms) },
-            ...(can('delete_data') ? [{ label: '', cell: (r) => btn('trash', 'Delete', { class: 'bad', title: 'Delete this entry', onclick: async () => {
-              if (!confirm('Delete this history entry?')) return;
-              try { await api(`${base}/history/${encodeURIComponent(r.id)}`, { method: 'DELETE' }); loadBody(); loadHead(); } catch (er) { alert(er.message); }
-            } }) }] : [])], d.rows), pager(page, d.total, 50, (p) => { page = p; loadBody(); })));
+            { label: 'Time spent', num: 1, cell: (r) => dur(r.duration_ms) }], d.rows), pager(page, d.total, 50, (p) => { page = p; loadBody(); }));
+          body.replaceChildren(can('delete_data') ? h('p', { class: 'hintline' }, 'Tip: press and hold an entry to select or delete.') : null, card);
+          selectable(card, d.rows, 'history', base, () => { loadBody(); loadHead(); });
         } else if (tab === 'sessions') {
           const d = await api(`${base}/sessions?${range()}&limit=100`);
           body.replaceChildren(h('div', { class: 'card' }, table([{ label: 'Started', cell: (r) => dt(r.started_at) }, { label: 'Ended', cell: (r) => dt(r.ended_at) }, { label: 'Duration', num: 1, cell: (r) => dur(r.duration_ms) }], d.rows)));
         } else {
           const d = await api(`${base}/searches?${range()}&limit=100`);
-          body.replaceChildren(h('div', { class: 'card' }, d.consent ? null : h('p', { class: 'hint' }, 'This user has not enabled search-query sharing.'),
+          const card = h('div', { class: 'card' }, d.consent ? null : h('p', { class: 'hint' }, 'This user has not enabled search-query sharing.'),
             table([{ label: 'When', cell: (r) => dt(r.searched_at) },
-              { label: 'Query', cell: (r) => extLink('https://www.google.com/search?q=' + encodeURIComponent(r.query), r.query) },
-              { label: 'Engine', cell: (r) => r.engine || '' },
-              ...(can('delete_data') ? [{ label: '', cell: (r) => btn('trash', 'Delete', { class: 'bad', title: 'Delete this search', onclick: async () => {
-                if (!confirm('Delete this search query?')) return;
-                try { await api(`${base}/searches/${encodeURIComponent(r.id)}`, { method: 'DELETE' }); loadBody(); } catch (er) { alert(er.message); }
-              } }) }] : [])], d.rows)));
+              { label: 'Query', main: 1, cell: (r) => extLink('https://www.google.com/search?q=' + encodeURIComponent(r.query), r.query) },
+              { label: 'Engine', cell: (r) => r.engine || '' }], d.rows));
+          body.replaceChildren(can('delete_data') ? h('p', { class: 'hintline' }, 'Tip: press and hold an entry to select or delete.') : null, card);
+          selectable(card, d.rows, 'searches', base, () => { loadBody(); });
         }
       } catch (e) { body.replaceChildren(errBox(e)); }
     };
@@ -607,6 +658,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
     if (shellEl && shellEl.parentNode === root) shellEl.replaceWith(shell); else root.replaceChildren(shell, tabbarEl);
     shellEl = shell;
     currentLoad = null;
+    endSelect();
     if (!can(route[5])) { main.append(h('p', { class: 'err' }, 'Not permitted.')); return; }
     const [bar, content, load] = uid ? await viewUser(box, decodeURIComponent(uid[1]))
       : site ? await viewSite(box, decodeURIComponent(site[1])) : await route[4](h('div', {}));

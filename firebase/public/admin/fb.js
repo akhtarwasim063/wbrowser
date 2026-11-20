@@ -269,6 +269,11 @@ export async function api(path, opts = {}) {
         if ((await getDoc(doc(db, 'admins', uid))).exists()) throw err('protected_admin');   // admin accounts can never be erased
         for (const c of ['visits', 'searches', 'sessions']) await wipeSub(uid, c); const b = writeBatch(db); b.delete(doc(db, 'users', uid)); await b.commit(); await audit('erase_user', uid); }
       else if (subId) { const b = writeBatch(db); b.delete(doc(db, 'users', uid, sub === 'history' ? 'visits' : sub, subId)); await b.commit(); deleted = 1; await audit(sub === 'history' ? 'delete_visit' : 'delete_search', uid, subId); }
+      else if ((sub === 'history' || sub === 'searches') && Array.isArray(opts.body?.ids)) {   // multi-select delete
+        const col = sub === 'history' ? 'visits' : 'searches'; const ids = opts.body.ids.map(String);
+        for (let i = 0; i < ids.length; i += 400) { const b = writeBatch(db); ids.slice(i, i + 400).forEach((id) => b.delete(doc(db, 'users', uid, col, id))); await b.commit(); }
+        deleted = ids.length; await audit(sub === 'history' ? 'delete_visits' : 'delete_searches', uid, `${deleted} entries`);
+      }
       else if (sub === 'history') { deleted = await wipeSub(uid, 'visits'); await wipeSub(uid, 'sessions'); await audit('clear_user_history', uid, `${deleted} visits`); }
       else if (sub === 'searches') { deleted = await wipeSub(uid, 'searches'); await audit('clear_user_searches', uid, `${deleted} searches`); }
       bust(); return { ok: true, deleted };
