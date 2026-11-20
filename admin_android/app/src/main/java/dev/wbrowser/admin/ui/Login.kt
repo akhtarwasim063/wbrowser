@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -63,18 +65,21 @@ fun LoginScreen(state: AuthState.SignedOut, onSignIn: (String, String) -> Unit, 
     val focus = LocalFocusManager.current
     val openLink = rememberOpenLink()
     val webUrl = "https://" + dev.wbrowser.admin.BuildConfig.FIREBASE_PROJECT_ID + ".web.app/admin/"
+    val field = if (p.dark) Color(0xFF1B2140) else Color.White
     val fieldColors = OutlinedTextFieldDefaults.colors(
-        focusedBorderColor = p.pri, unfocusedBorderColor = p.glassRimBottom.copy(alpha = 0.5f),
-        focusedContainerColor = p.glassFill, unfocusedContainerColor = p.glassFill,
+        focusedBorderColor = p.pri, unfocusedBorderColor = if (p.dark) Color(0x66FFFFFF) else Color(0x665456E8),
+        focusedContainerColor = field, unfocusedContainerColor = field,
         focusedTextColor = p.ink, unfocusedTextColor = p.ink, cursorColor = p.pri,
         focusedLabelColor = p.pri, unfocusedLabelColor = p.mut,
     )
     val brand = Brush.horizontalGradient(listOf(p.pri, p.pri2))
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).statusBarsPadding().imePadding().navigationBarsPadding().padding(horizontal = 22.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).statusBarsPadding().imePadding().navigationBarsPadding(),
         verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+    Column(Modifier.widthIn(max = 460.dp).fillMaxWidth().padding(horizontal = 22.dp)) {
         Spacer(Modifier.height(24.dp))
         Reveal(0) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -87,12 +92,12 @@ fun LoginScreen(state: AuthState.SignedOut, onSignIn: (String, String) -> Unit, 
         Reveal(1) {
             Column {
                 Text("Welcome back", color = p.ink, fontWeight = FontWeight.Bold, fontSize = 28.sp, letterSpacing = (-0.6).sp)
-                Text("Sign in to see how your browser is used.", color = p.mut, fontSize = 14.sp)
+                Text("Sign in to see how your browser is used.", color = p.mut, fontSize = 15.sp, lineHeight = 21.sp)
             }
         }
         Spacer(Modifier.height(18.dp))
         Reveal(2) {
-            AdminCard(padding = 16.dp) {
+            LoginCard {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedTextField(
                         value = email, onValueChange = { email = it }, label = { Text("Email") }, singleLine = true, shape = RoundedCornerShape(14.dp),
@@ -111,31 +116,43 @@ fun LoginScreen(state: AuthState.SignedOut, onSignIn: (String, String) -> Unit, 
                         keyboardActions = KeyboardActions(onGo = { focus.clearFocus(); onSignIn(email, password) }),
                     )
                     AnimatedVisibility(state.error != null, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
-                        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(p.badSoft).padding(10.dp)) { Text(state.error.orEmpty(), color = p.bad, fontSize = 13.sp) }
+                        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(p.badSoft).padding(10.dp)) { Text(state.error.orEmpty(), color = p.bad, fontSize = 14.sp, lineHeight = 19.sp) }
                     }
                     AnimatedVisibility(state.info != null, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
-                        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(p.okSoft).padding(10.dp)) { Text(state.info.orEmpty(), color = p.ok, fontSize = 13.sp) }
+                        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(p.okSoft).padding(10.dp)) { Text(state.info.orEmpty(), color = p.ok, fontSize = 14.sp, lineHeight = 19.sp) }
                     }
                     val src = remember { MutableInteractionSource() }
                     Box(
-                        Modifier.fillMaxWidth().height(48.dp).pressScale(src, 0.97f).clip(RoundedCornerShape(14.dp)).background(brand)
+                        Modifier.fillMaxWidth().height(52.dp).pressScale(src, 0.97f).clip(RoundedCornerShape(14.dp)).background(brand)
                             .clickable(interactionSource = src, indication = null, enabled = !state.busy) { focus.clearFocus(); onSignIn(email, password) },
                         contentAlignment = Alignment.Center,
                     ) {
                         if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), color = Color.White, strokeWidth = 2.5.dp)
-                        else Text("Sign in", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        else Text("Sign in", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     }
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        TextButton(onClick = { focus.clearFocus(); onForgot(email) }, enabled = !state.busy) { Text("Forgot password?", color = p.pri, fontWeight = FontWeight.SemiBold, fontSize = 13.sp) }
+                        TextButton(onClick = { focus.clearFocus(); onForgot(email) }, enabled = !state.busy) { Text("Forgot password?", color = p.pri, fontWeight = FontWeight.SemiBold, fontSize = 14.sp) }
                     }
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        TextButton(onClick = { openLink(webUrl) }) { Text("Locked out? Recover on the web console", color = p.mut, fontSize = 12.sp) }
+                        TextButton(onClick = { openLink(webUrl) }) { Text("Locked out? Recover on the web console", color = p.mut, fontSize = 13.sp, textAlign = TextAlign.Center) }
                     }
                 }
             }
         }
         Spacer(Modifier.height(14.dp))
-        Text("Access is limited to authorised administrators. Activity is logged.", color = p.mut, fontSize = 11.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+        Text("Access is limited to authorised administrators. Activity is logged.", color = p.mut, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
         Spacer(Modifier.height(24.dp))
     }
+    }
+}
+
+/** The login card: an almost opaque surface, so text stays sharp on top of the moving glass background. */
+@Composable
+private fun LoginCard(content: @Composable () -> Unit) {
+    val p = palette()
+    val shape = RoundedCornerShape(22.dp)
+    Box(
+        Modifier.fillMaxWidth().clip(shape).background(p.card.copy(alpha = if (p.dark) 0.94f else 0.96f))
+            .border(1.dp, if (p.dark) Color(0x33FFFFFF) else Color(0x335456E8), shape).padding(18.dp),
+    ) { content() }
 }
