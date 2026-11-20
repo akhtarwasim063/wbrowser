@@ -40,3 +40,7 @@ Current feature branch: `feature/background-playback-pip` (background playback, 
 
 Android Studio steps (which folder to open, run configuration): `docs/ANDROID_STUDIO_SETUP.md`. Firebase setup is in `firebase/README.md`. Compliance notes are in `docs/RESEARCH_AND_COMPLIANCE.md`.
 The earlier Flutter prototype and the Node/SQLite backend were removed (still in git history before the cleanup commit).
+
+## Accounts, new computers and cleanup
+- Work from any computer, owner-account recovery (emailed sign-in link) and how to remove everything from a work PC: `docs/SETUP_AND_CLEANUP.md`.
+- `mybrowser.server@gmail.com` is the one permanent superadmin. If its sign-in is ever deleted, open the web admin and tap **Locked out? Email me a sign-in link**.
