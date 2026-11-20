@@ -9,8 +9,7 @@ on admin sign-ins.
     users/{uid}/visits|searches|sessions/{id}
     admins/{uid}, audit/{id}
 
-Roles: **superadmin** (read everything, delete, suspend) and **analyst** (read-only). The old Node/SQLite backend in
-`../tracking_backend` is still in the repo as an alternative; the apps now use Firebase.
+Roles: **superadmin** (read everything, delete, suspend) and **analyst** (read-only). The legal pages (privacy, terms) are built from `legal/` by `npm run build:legal`.
 
 ## One-time setup (about 15 minutes, in your own Google account)
 1. https://console.firebase.google.com > **Add project** (any name; Analytics not needed).
