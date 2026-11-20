@@ -38,5 +38,5 @@ Current feature branch: `feature/background-playback-pip` (background playback, 
     cd native_android && gradlew installDebug
     cd admin_android  && gradlew installDebug -PADMIN_URL=https://<project>.web.app/admin/
 
-Firebase setup is in `firebase/README.md`. Compliance notes are in `docs/RESEARCH_AND_COMPLIANCE.md`.
+Android Studio steps (which folder to open, run configuration): `docs/ANDROID_STUDIO_SETUP.md`. Firebase setup is in `firebase/README.md`. Compliance notes are in `docs/RESEARCH_AND_COMPLIANCE.md`.
 The earlier Flutter prototype and the Node/SQLite backend were removed (still in git history before the cleanup commit).
