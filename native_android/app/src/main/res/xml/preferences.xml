@@ -142,6 +142,12 @@
             app:key="bg_playback"
             app:summary="Keep YouTube and other video/audio playing when you switch apps or lock the phone, like Brave's background playback."
             app:title="Play video and audio in the background" />
+        <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:iconSpaceReserved="false"
+            app:key="auto_pip"
+            app:summary="When a video is playing and you go to the home screen, float it in a small window with play/pause and seek buttons."
+            app:title="Auto mini-player" />
     </PreferenceCategory>
 
     <PreferenceCategory app:title="Account" app:iconSpaceReserved="false">

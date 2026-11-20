@@ -68,6 +68,47 @@ class BrowserTab(private val host: TabHost, val isPrivate: Boolean) {
         private set
     private var activeMediaSession: MediaSession? = null
 
+    // what the page tells us about its media (title/artist/artwork/position/features): drives the notification and lock-screen controls
+    var mediaArtist = ""
+        private set
+    var mediaAlbum = ""
+        private set
+    var mediaArtwork: Bitmap? = null
+        private set
+    var mediaDurationMs = 0L
+        private set
+    private var mediaPositionMs = 0L
+    private var mediaPositionStamp = 0L
+    var mediaRate = 1.0
+        private set
+    var mediaFeatures = 0L
+        private set
+    /** Real size of the playing video (when the page reports it), used for the mini-player aspect ratio. */
+    var videoWidth = 0
+        private set
+    var videoHeight = 0
+        private set
+    val hasMediaSession get() = activeMediaSession != null
+
+    /** Best guess of the current playback position now (the page only reports it when it changes). */
+    fun mediaPositionNow(): Long {
+        if (!isPlayingMedia || mediaPositionStamp == 0L) return mediaPositionMs
+        val v = mediaPositionMs + ((android.os.SystemClock.elapsedRealtime() - mediaPositionStamp) * mediaRate).toLong()
+        return if (mediaDurationMs > 0) v.coerceIn(0, mediaDurationMs) else v.coerceAtLeast(0)
+    }
+
+    fun mediaInfo() = MediaInfo(
+        title = mediaTitle.ifBlank { displayTitle() }, artist = mediaArtist.ifBlank { Uri.parse(url).host.orEmpty() }, album = mediaAlbum,
+        artwork = mediaArtwork, playing = isPlayingMedia, positionMs = mediaPositionNow(), durationMs = mediaDurationMs,
+        rate = mediaRate.toFloat(), features = mediaFeatures,
+    )
+
+    private fun resetMediaInfo() {
+        mediaTitle = ""; mediaArtist = ""; mediaAlbum = ""; mediaArtwork = null
+        mediaDurationMs = 0; mediaPositionMs = 0; mediaPositionStamp = 0; mediaRate = 1.0; mediaFeatures = 0
+        videoWidth = 0; videoHeight = 0
+    }
+
     /** True while the page has a video in HTML5 fullscreen (the signal nearly every streaming
      *  site - YouTube, Netflix, Prime, Hotstar... - uses for its player). More reliable than the
      *  media-session play/pause events on sites with unusual players, so it is the primary trigger
@@ -82,6 +123,20 @@ class BrowserTab(private val host: TabHost, val isPrivate: Boolean) {
     }
 
     fun pauseMediaPlayback() { activeMediaSession?.pause() }
+    fun stopMediaPlayback() { activeMediaSession?.stop() }
+    fun nextTrack() { activeMediaSession?.nextTrack() }
+    fun previousTrack() { activeMediaSession?.previousTrack() }
+    /** Seek to an absolute position (milliseconds). */
+    fun seekToMs(ms: Long) {
+        val t = (if (mediaDurationMs > 0) ms.coerceIn(0, mediaDurationMs) else ms.coerceAtLeast(0)) / 1000.0
+        activeMediaSession?.seekTo(t, false)
+        mediaPositionMs = (t * 1000).toLong(); mediaPositionStamp = android.os.SystemClock.elapsedRealtime()
+        host.onMediaChanged(this)
+    }
+    /** Skip forward/back (negative) by [deltaMs]. */
+    fun seekByMs(deltaMs: Long) = seekToMs(mediaPositionNow() + deltaMs)
+    /** The system took audio focus away (call, another player) or gave it back. */
+    fun audioFocusChanged(state: Int) { activeMediaSession?.notifySystemAudioFocusChange(state) }
 
     /** Play only (never toggles), used to undo a pause the page/engine did on its own when the
      *  app left the foreground. Returns false if there is no media session to resume. */
@@ -137,20 +192,43 @@ class BrowserTab(private val host: TabHost, val isPrivate: Boolean) {
             }
             override fun onDeactivated(s: GeckoSession, mediaSession: MediaSession) {
                 android.util.Log.d("WBMedia", "deactivated")
-                if (activeMediaSession === mediaSession) activeMediaSession = null
+                if (activeMediaSession === mediaSession) { activeMediaSession = null; resetMediaInfo() }
                 isPlayingMedia = false
                 host.onMediaChanged(this@BrowserTab)
             }
             override fun onMetadata(s: GeckoSession, mediaSession: MediaSession, meta: MediaSession.Metadata) {
                 mediaTitle = meta.title ?: ""
+                mediaArtist = meta.artist ?: ""
+                mediaAlbum = meta.album ?: ""
+                host.onMediaChanged(this@BrowserTab)
+                // artwork arrives asynchronously; the notification and lock screen refresh when it is ready
+                runCatching {
+                    meta.artwork?.getBitmap(512)?.accept({ bmp -> if (bmp != null) { mediaArtwork = bmp; host.onMediaChanged(this@BrowserTab) } }, { })
+                }
+            }
+            override fun onFeatures(s: GeckoSession, mediaSession: MediaSession, features: Long) {
+                mediaFeatures = features
+                host.onMediaChanged(this@BrowserTab)
+            }
+            override fun onPositionState(s: GeckoSession, mediaSession: MediaSession, state: MediaSession.PositionState) {
+                mediaDurationMs = if (state.duration.isFinite() && state.duration > 0) (state.duration * 1000).toLong() else 0L
+                mediaPositionMs = (state.position * 1000).toLong().coerceAtLeast(0)
+                mediaRate = if (state.playbackRate > 0) state.playbackRate else 1.0
+                mediaPositionStamp = android.os.SystemClock.elapsedRealtime()
+                host.onMediaChanged(this@BrowserTab)
+            }
+            override fun onFullscreen(s: GeckoSession, mediaSession: MediaSession, enabled: Boolean, meta: MediaSession.ElementMetadata?) {
+                if (meta != null && meta.width > 0 && meta.height > 0) { videoWidth = meta.width.toInt(); videoHeight = meta.height.toInt() }
             }
             override fun onPlay(s: GeckoSession, mediaSession: MediaSession) {
                 android.util.Log.d("WBMedia", "onPlay")
+                mediaPositionStamp = android.os.SystemClock.elapsedRealtime()
                 isPlayingMedia = true
                 host.onMediaChanged(this@BrowserTab)
             }
             override fun onPause(s: GeckoSession, mediaSession: MediaSession) {
                 android.util.Log.d("WBMedia", "onPause")
+                mediaPositionMs = mediaPositionNow(); mediaPositionStamp = android.os.SystemClock.elapsedRealtime()
                 isPlayingMedia = false
                 host.onMediaChanged(this@BrowserTab)
             }

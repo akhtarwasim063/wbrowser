@@ -3,7 +3,7 @@
 > **Read this first. Update it after EVERY change.** It exists so that if a session, a PC or an assistant is lost, a new one can open this file and know
 > what was being done, what is finished, what is left, how to do it and which rules apply. Keep it truthful and short per entry.
 
-Last updated: 2026-11-20 (file created; nothing implemented yet)
+Last updated: 2026-11-20 (playback branch: MediaSession + PiP video-only layout implemented, phone check of lock screen pending; see section 10)
 
 ---------------------------------------------------------------------------------------------------
 
@@ -113,6 +113,7 @@ adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
 adb -s <serial> shell monkey -p dev.wbrowser.nativeapp -c android.intent.category.LAUNCHER 1
 adb -s <serial> logcat -c ; adb -s <serial> logcat -s WBMedia AndroidRuntime:E     # media/PiP logs use the tag WBMedia
 ```
+Playback debug helper: `native_android/tools/bgtest/server.js` (a test page with audio that reports `document.hidden` and pause events; run `node server.js`, `adb reverse tcp:8765 tcp:8765`, open `http://localhost:8765/` in the browser, press play, press Home).
 Admin app: same from `admin_android/` (package `dev.wbrowser.admin`). Build facts: AGP 9.5.1, Gradle 9.6, compileSdk 37.2, minSdk 26.
 
 ---------------------------------------------------------------------------------------------------
@@ -165,14 +166,14 @@ Acceptance: screenshots on the phone in light and dark; no text unreadable on gl
 
 ### 6.P  Playback: foreground and background  (branch `feature/browser-playback`)
 Goal: audio/video keeps playing when the app is in the background or the screen is off, with proper controls, and resumes correctly.
-- [ ] P1 Baseline on the phone: write the test matrix result (YouTube, another video site, audio-only site) for: Home button, lock screen, PiP, switching tab, incoming call. Record what fails.
-- [ ] P2 Real media notification: a MediaSession with MediaStyle notification: title/artist/artwork from Gecko `MediaSession.Metadata`, Play/Pause, Seek, Previous/Next when the page offers them, lock-screen controls, Stop.
-- [ ] P3 Audio focus policy: pause on focus loss (call/other app), resume on gain, duck for short interruptions, pause on headphones unplugged (`ACTION_AUDIO_BECOMING_NOISY`), headset/Bluetooth buttons.
-- [ ] P4 Foreground service hardening: Android 14+ foreground-service rules and timeouts, safe restart, stop when idle for a while, wake lock only while playing, Wi-Fi lock for streams.
-- [ ] P5 Replace timer-based resume with an event-based approach (keepalive.js + session active/focused + media session callbacks); remove the 250/700/1400/2500 ms retries once proven unnecessary.
-- [ ] P6 PiP: aspect ratio from the real video size, auto-enter on Android 12+ (`setAutoEnterEnabled`), play/pause (and close) actions in the PiP window, `sourceRectHint`, correct chrome hiding/restoring.
+- [x] P1 Baseline on the phone (2026-11-20). Findings: (a) in PiP the window showed the whole YouTube page, not the video; (b) `dumpsys media_session` had 0 sessions, so no lock-screen/notification controls were possible; (c) YouTube paused itself ~30 ms after every resume (play/pause ping-pong in `adb logcat -s WBMedia`); (d) the old keepalive.js and youtube.js injected an inline script, which YouTube's CSP blocks, so they probably never worked on YouTube; (e) a plain audio test page (`native_android/tools/bgtest`) keeps playing through Home and screen-off with `document.hidden=false` the whole time.
+- [~] P2 Real media notification. DONE in code: MediaSession + MediaStyle notification (title/artist/album/artwork, play/pause, seek bar, back/forward 10 s, previous/next when the page offers them, stop). Verified: `dumpsys media_session` shows `WBrowserMedia` PLAYING actions=847. STILL TO CHECK BY EYE: notification shade and lock screen UI and the button presses (the phone locked itself during the test, see Known issues).
+- [~] P3 Audio focus (pause on loss, resume after a short loss) and pause when headphones are unplugged: implemented in `MediaPlaybackService`, not tested yet (needs a call or another player).
+- [~] P4 Service hardening: wake lock and Wi-Fi lock only while playing, notification detaches when paused, auto-stop after 15 min paused. Android 14+ foreground-service timeouts not verified.
+- [~] P5 Resume logic: retries cut to two (350 / 1200 ms) and never override a user pause (6 s guard). The ROOT CAUSE of YouTube pausing itself in the background is NOT found yet (see Known issues).
+- [~] P6 PiP: video-only layout in the mini-player (VERIFIED on the phone: the window shows only the video), aspect ratio from the video size, auto-enter on Android 12+, back/play-pause/forward buttons in the PiP window, closing the window pauses. The PiP buttons and auto-enter still need a tap test.
 - [ ] P7 Aggressive battery managers (ColorOS/MIUI etc.): optional prompt to exclude the app from battery optimisation, with a short explanation screen.
-- [ ] P8 Settings: clear toggles ("Play in background", "Auto mini-player", "Keep playing when screen is off") wired to `Prefs`.
+- [~] P8 Settings: "Auto mini-player" (`auto_pip`) added next to "Play video and audio in the background" (`bg_playback`). Wording/other toggles still open.
 Acceptance: YouTube plays with screen locked for 10+ minutes; notification controls work from the lock screen; a phone call pauses and playback resumes after; PiP controls work.
 
 ### 6.Y  YouTube  (branch `feature/browser-youtube`)
@@ -222,6 +223,10 @@ Document the field in `firebase/README.md` (data model) and in the log here. Rol
 ---------------------------------------------------------------------------------------------------
 
 ## 8. Known issues and open questions (keep short)
+- **OPEN, most important: YouTube (m.youtube.com) pauses itself right after leaving the app, and again ~30 ms after every resume.** A plain `<audio>` page does NOT (it plays through Home and screen-off), so the cause is YouTube-specific or video-specific. Next step: turn on `WB_DEBUG` in `keepalive.js` (see section 4) and read which events reach the page right before the pause (`visibilitychange`, `blur`, `pagehide`...). Note that `blur` events still reached the page in the test, so the blur swallowing in `keepalive.js` is not effective (investigate: maybe `e.target` comparison across the Xray wrapper).
+- `youtube.js` (ad shield) still injects an inline script, which YouTube's CSP blocks. Rewrite it with `wrappedJSObject` / `exportFunction` like `keepalive.js` (task Y2).
+- Testing on the phone: do NOT send `KEYCODE_SLEEP` (screen off) from adb unless the owner is ready to unlock: it locks the phone and the tests cannot continue. Never unlock the phone programmatically. Ask the owner to unlock and keep it awake (Settings > Display > screen timeout).
+- A screenshot of a video surface can look black; judge the PiP window from a screenshot of the launcher while it floats (it shows the real frame).
 - Open: which of F (bookmarks / reader mode / downloads) does the owner want first? (not blocking the current round)
 - Open: should the UI work copy the exact admin glass look, or a lighter version for performance on older phones? (decide in U2)
 - Note: `firebase/test/rules.test.js` could not be run on the work PC (no Java); run it where Java is available before relying on the rule changes.
@@ -234,7 +239,7 @@ Document the field in `firebase/README.md` (data model) and in the log here. Rol
 | Stream | Branch | Tasks | Done | Now working on |
 |---|---|---|---|---|
 | UI | `feature/browser-ui` | 7 | 0 | nothing started |
-| Playback | `feature/browser-playback` | 8 | 0 | nothing started |
+| Playback | `feature/browser-playback` | 8 | 1 | P2, P6 coded and partly verified; YouTube self-pause root cause open |
 | YouTube | `feature/browser-youtube` | 6 | 0 | nothing started |
 | Admin | (per task) | n/a | n/a | idle |
 
@@ -245,3 +250,6 @@ Document the field in `firebase/README.md` (data model) and in the log here. Rol
 Format: `YYYY-MM-DD | branch | task | what changed (files) | tested how | commit`
 
 2026-11-20 | development | setup | created this HANDOFF.md and the three work branches (ui, playback, youtube) from `dfe3ccb` | n/a (docs only) | see git log
+2026-11-20 | feature/browser-playback | P1 | baseline on phone: PiP showed the whole page, 0 media sessions, YouTube self-pauses, old scripts blocked by CSP | adb + screenshots + dumpsys | n/a
+2026-11-20 | feature/browser-playback | P2,P3,P4 | MediaPlaybackService rewritten: MediaSession + MediaStyle notification, audio focus, noisy receiver, wake+wifi lock; Tabs.kt collects metadata/artwork/position/features and exposes seek/next/prev; MainActivity wires them (refreshMediaSession) | dumpsys media_session shows PLAYING actions=847; UI not yet seen | see git log
+2026-11-20 | feature/browser-playback | P5,P6,P8 | keepalive.js rewritten (CSP-safe via wrappedJSObject, plus PiP video-only layout); PiP params with aspect ratio, actions and auto-enter; auto_pip setting; tools/bgtest | PiP window showed only the video on the phone | see git log

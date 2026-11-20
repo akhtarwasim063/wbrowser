@@ -2,6 +2,10 @@ package dev.wbrowser.nativeapp
 
 import android.app.DownloadManager
 import android.app.PictureInPictureParams
+import android.os.SystemClock
+import android.graphics.drawable.Icon
+import android.app.RemoteAction
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -121,6 +125,7 @@ class MainActivity : AppCompatActivity(), TabHost {
         ) notifPermLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
 
         ContextCompat.registerReceiver(this, screenStateReceiver, IntentFilter(Intent.ACTION_SCREEN_OFF), ContextCompat.RECEIVER_NOT_EXPORTED)
+        ContextCompat.registerReceiver(this, pipActionReceiver, IntentFilter().apply { addAction(PIP_REW); addAction(PIP_TOGGLE); addAction(PIP_FWD) }, ContextCompat.RECEIVER_NOT_EXPORTED)
     }
 
     private val notifPermLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -213,6 +218,7 @@ class MainActivity : AppCompatActivity(), TabHost {
     override fun onDestroy() {
         super.onDestroy()
         runCatching { unregisterReceiver(screenStateReceiver) }
+        runCatching { unregisterReceiver(pipActionReceiver) }
         if (isFinishing) {
             MediaPlaybackService.stop(this)
             if (Prefs.bool("clear_on_exit", false)) {
@@ -426,20 +432,77 @@ class MainActivity : AppCompatActivity(), TabHost {
     // ======================= mini-player (PiP) + background playback =======================
     override fun onMediaChanged(tab: BrowserTab) {
         if (tab === current) syncUi()
-        if (tab.isPlayingMedia) {
-            MediaBridge.onToggle = { tab.toggleMediaPlayback() }
-            MediaBridge.onStop = { tab.pauseMediaPlayback() }
-            MediaPlaybackService.update(this, tab.mediaTitle.ifBlank { tab.displayTitle() }, true)
-        } else if (tabs.none { it.isPlayingMedia }) {
+        refreshMediaSession()
+    }
+
+    /** Last time the user (notification, lock screen, mini-player) paused on purpose: we never "resume" over that. */
+    private var lastUserPauseAt = 0L
+    private val refreshService = Runnable { if (MediaBridge.info != null) MediaPlaybackService.refresh(this) }
+
+    /** Picks the tab whose media is shown in the notification, on the lock screen and in the mini-player, and wires their buttons to it. */
+    private fun refreshMediaSession() {
+        val t = tabs.firstOrNull { it.isPlayingMedia } ?: current?.takeIf { it.hasMediaSession } ?: tabs.firstOrNull { it.hasMediaSession }
+        if (t == null) {
+            MediaBridge.info = null
+            MediaBridge.onPlay = null; MediaBridge.onPause = null; MediaBridge.onStop = null; MediaBridge.onNext = null
+            MediaBridge.onPrevious = null; MediaBridge.onSeekTo = null; MediaBridge.onSeekBy = null
+            ui.removeCallbacks(refreshService)
             MediaPlaybackService.stop(this)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) runCatching { setPictureInPictureParams(pipParams(null)) }
+            return
         }
+        MediaBridge.onPlay = { t.resumeMediaPlayback() }
+        MediaBridge.onPause = { lastUserPauseAt = SystemClock.uptimeMillis(); t.pauseMediaPlayback() }
+        MediaBridge.onStop = { lastUserPauseAt = SystemClock.uptimeMillis(); t.stopMediaPlayback() }
+        MediaBridge.onNext = { t.nextTrack() }
+        MediaBridge.onPrevious = { t.previousTrack() }
+        MediaBridge.onSeekTo = { ms -> t.seekToMs(ms) }
+        MediaBridge.onSeekBy = { d -> t.seekByMs(d) }
+        MediaBridge.info = t.mediaInfo()
+        ui.removeCallbacks(refreshService)
+        ui.postDelayed(refreshService, 120)      // metadata, artwork and position arrive in bursts: show them once
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) runCatching { setPictureInPictureParams(pipParams(t)) }
+    }
+
+    // ---- mini-player (picture-in-picture) controls: back 10 s, play/pause, forward 10 s in the little window itself
+    private val pipActionReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.action) {
+                PIP_REW -> MediaBridge.onSeekBy?.invoke(-MediaPlaybackService.SEEK_STEP_MS)
+                PIP_TOGGLE -> MediaBridge.toggle()
+                PIP_FWD -> MediaBridge.onSeekBy?.invoke(MediaPlaybackService.SEEK_STEP_MS)
+            }
+        }
+    }
+
+    private fun pipParams(tab: BrowserTab?): PictureInPictureParams {
+        val b = PictureInPictureParams.Builder()
+        val w = tab?.videoWidth ?: 0
+        val h = tab?.videoHeight ?: 0
+        b.setAspectRatio(if (w > 0 && h > 0 && w.toFloat() / h in 0.45f..2.3f) Rational(w, h) else Rational(16, 9))
+        val playing = tab?.isPlayingMedia == true
+        fun act(icon: Int, title: String, code: Int, action: String) = RemoteAction(
+            Icon.createWithResource(this, icon), title, title,
+            PendingIntent.getBroadcast(this, code, Intent(action).setPackage(packageName), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT),
+        )
+        if (tab != null && tab.hasMediaSession) {
+            val acts = mutableListOf<RemoteAction>()
+            if (tab.mediaDurationMs > 0) acts += act(R.drawable.ic_media_rew, "Back 10 seconds", 1, PIP_REW)
+            acts += if (playing) act(R.drawable.ic_media_pause, "Pause", 2, PIP_TOGGLE) else act(R.drawable.ic_media_play, "Play", 2, PIP_TOGGLE)
+            if (tab.mediaDurationMs > 0) acts += act(R.drawable.ic_media_ff, "Forward 10 seconds", 3, PIP_FWD)
+            b.setActions(acts)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            b.setAutoEnterEnabled(playing && Prefs.bool("auto_pip", true))   // swipe home and the video floats, no flicker
+            b.setSeamlessResizeEnabled(false)
+        }
+        return b.build()
     }
 
     /** Pops the current page out into Android's floating mini-player window. */
     private fun enterMiniPlayer() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val params = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build()
-        val ok = runCatching { enterPictureInPictureMode(params) }
+        val ok = runCatching { enterPictureInPictureMode(pipParams(current)) }
         android.util.Log.d("WBMedia", "enterPip -> $ok")
     }
 
@@ -452,10 +515,10 @@ class MainActivity : AppCompatActivity(), TabHost {
     private fun resumeAfterBackgrounding(tab: BrowserTab?, reason: String) {
         if (tab == null) return
         keepPageActive(tab)
-        for (delay in longArrayOf(250, 700, 1400, 2500)) {
+        for (delay in longArrayOf(350, 1200)) {
             ui.postDelayed({
                 val t = current
-                if (t === tab && backgroundResumeWanted) {
+                if (t === tab && backgroundResumeWanted && SystemClock.uptimeMillis() - lastUserPauseAt > 6000) {
                     keepPageActive(t)
                     if (!t.isPlayingMedia) {
                         val ok = t.resumeMediaPlayback()
@@ -478,6 +541,7 @@ class MainActivity : AppCompatActivity(), TabHost {
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         inPip = isInPictureInPictureMode
+        if (!isInPictureInPictureMode) ui.post { if (!lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) MediaBridge.onPause?.invoke() }
         if (isInPictureInPictureMode && Prefs.bool("bg_playback", true)) {
             backgroundResumeWanted = true
             resumeAfterBackgrounding(current, "pip")
@@ -497,7 +561,7 @@ class MainActivity : AppCompatActivity(), TabHost {
         super.onUserLeaveHint()
         val t = current
         android.util.Log.d("WBMedia", "userLeaveHint playing=${t?.isPlayingMedia} fs=${t?.isFullscreenVideo}")
-        if (!inPip && t != null && (t.isPlayingMedia || t.isFullscreenVideo)) enterMiniPlayer()
+        if (!inPip && t != null && (t.isPlayingMedia || t.isFullscreenVideo) && Prefs.bool("auto_pip", true)) enterMiniPlayer()
     }
 
     /** Theater mode: hide the address/toolbars so a video gets the whole screen; a small chip in
@@ -980,3 +1044,7 @@ class MainActivity : AppCompatActivity(), TabHost {
         if (requestCode == REQ_LIST) data?.getStringExtra("open")?.let { current?.session?.loadUri(it) }
     }
 }
+
+private const val PIP_REW = "dev.wbrowser.nativeapp.pip.REW"
+private const val PIP_TOGGLE = "dev.wbrowser.nativeapp.pip.TOGGLE"
+private const val PIP_FWD = "dev.wbrowser.nativeapp.pip.FWD"
