@@ -8,7 +8,6 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
 import android.view.View
-import android.view.WindowManager
 import android.webkit.CookieManager
 import android.webkit.JsPromptResult
 import android.webkit.JsResult
@@ -34,7 +33,7 @@ import androidx.core.view.WindowInsetsCompat
  * WBrowser Admin: a locked-down shell around the Admin web app.
  * - only the configured admin server is shown in-app; every other link opens in the phone's browser
  * - JS alert/confirm/prompt (used by the admin UI for delete confirmations) are shown as native dialogs
- * - release builds block screenshots and refuse plain http
+ * - release builds refuse plain http (screenshots and screen recording are allowed)
  * It holds no credentials: you sign in on the admin page, the session lives in an HttpOnly cookie.
  */
 class MainActivity : AppCompatActivity() {
@@ -49,9 +48,8 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (!BuildConfig.DEBUG) window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
 
-        web = WebView(this)
+        web = WebView(this).apply { overScrollMode = View.OVER_SCROLL_NEVER }
         errorText = TextView(this).apply { textSize = 16f; setPadding(48, 48, 48, 24) }
         errorBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; visibility = View.GONE; setPadding(32, 120, 32, 32)
