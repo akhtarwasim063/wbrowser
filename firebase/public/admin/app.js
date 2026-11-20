@@ -144,7 +144,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
     let d = `M${pts[0][0]},${pts[0][1]}`;
     for (let i = 1; i < pts.length; i++) { const [x0, y0] = pts[i - 1], [x1, y1] = pts[i], cx = (x0 + x1) / 2; d += ` C${cx},${y0} ${cx},${y1} ${x1},${y1}`; }
     svg.append(s('path', { d: `${d} L${pts[pts.length - 1][0]},${H - B} L${pts[0][0]},${H - B} Z`, fill: `url(#${id})`, class: 'ar' }));
-    svg.append(s('path', { d, class: 'ln', fill: 'none' }));
+    svg.append(s('path', { d, class: 'ln', fill: 'none', pathLength: '1' }));
     rows.forEach((r, i) => {
       svg.append(s('circle', { class: 'hit', cx: pts[i][0], cy: pts[i][1], r: 14 }, s('title', {}, `${r.day}: ${fmt(r[key])}`)),
         s('circle', { class: rows.length < 3 ? 'dotp show' : 'dotp', cx: pts[i][0], cy: pts[i][1], r: 4.5 }));
@@ -184,7 +184,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
     return h('table', {},
       h('thead', {}, h('tr', {}, cols.map((c) => h('th', { class: c.num ? 'num' : '' }, c.label)))),
       h('tbody', {}, rows.length ? rows.map((r) => h('tr', onRow ? { class: 'click', onclick: () => onRow(r) } : {},
-        cols.map((c) => h('td', { class: (c.num ? 'num ' : '') + (c.cls || ''), 'data-label': c.label || '' }, c.cell(r))))) : h('tr', {}, h('td', { colspan: cols.length, class: 'empty' }, 'Nothing to show.'))));
+        cols.map((c) => h('td', { class: (c.num ? 'num ' : '') + (c.main ? 'main ' : '') + (c.cls || ''), 'data-label': c.label || '' }, c.cell(r))))) : h('tr', {}, h('td', { colspan: cols.length, class: 'empty' }, 'Nothing to show.'))));
   }
   const kpi = (v, l, icon, t = '') => h('div', { class: `kpi ${t}` }, h('div', { class: 'badge' }, ico(icon)), h('b', {}, v), h('span', {}, l));
   const pager = (page, total, limit, go) => h('div', { class: 'pager' },
@@ -192,12 +192,12 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
     h('button', { disabled: page <= 1, onclick: () => go(page - 1) }, 'Prev'), h('span', {}, `Page ${page}`),
     h('button', { disabled: page * limit >= total, onclick: () => go(page + 1) }, 'Next'));
   const card = (title, hint, ...body) => h('div', { class: 'card' }, h('h2', {}, title), hint ? h('p', { class: 'hint' }, hint) : h('div', { class: 'hint' }), body);
+  const navRow = (href, icon, title, hint) => h('a', { class: 'listrow', href }, h('div', { class: 'badge' }, ico(icon)), h('div', {}, h('b', {}, title), h('div', { class: 'sub' }, hint)), h('span', { class: 'go' }, ico('chev')));
   const searchBox = (placeholder, on) => h('div', { class: 'search' }, ico('search'), h('input', { placeholder, oninput: (e) => on(e.target.value) }));
 
   // ---------- views ----------
   async function viewOverview(box) {
     const load = async () => {
-      box.replaceChildren(loading());
       try {
         const d = await api(`/overview?${range()}`);
         box.replaceChildren(
@@ -206,6 +206,8 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
             kpi(fmt(d.totals.visits), 'Page visits', 'globe', 't-cyan'), kpi(fmt(d.totals.domains), 'Websites visited', 'layers', 't-violet'),
             kpi(dur(d.totals.totalMs), 'Total browsing time', 'clock', 't-warn'), kpi(dur(d.sessions.avgMs), 'Avg session duration', 'clock', 't-ok'),
             kpi(fmt(d.sessions.n), 'Sessions', 'list', 't-cyan'), kpi(fmt(d.users.newUsers), 'New users', 'userplus', 't-violet')),
+          h('div', { class: 'card list' }, h('h2', {}, 'Sessions'), h('div', { class: 'hint' }, `${fmt(d.sessions.n)} sessions, ${dur(d.sessions.avgMs)} on average`),
+            navRow('#/sessions', 'clock', 'Session details', 'How often and how long the browser is used')),
           h('div', { class: 'cols' },
             card('Visits per day', 'Pages opened across all users', areaChart(d.daily, 'visits', 'Visits per day')),
             card('Active users per day', 'Distinct people browsing', areaChart(d.daily, 'users', 'Active users per day', 'cy'))),
@@ -226,7 +228,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
       try {
         const d = await api(`/websites?${range()}&q=${encodeURIComponent(q)}&sort=${sort}&limit=200`);
         box.replaceChildren(h('div', { class: 'card' }, table([
-          { label: 'Website', cell: (r) => h('div', { class: 'who' }, h('div', { class: `av sq ${tone(r.domain)}` }, r.domain[0].toUpperCase()), siteLink(r.domain)) },
+          { label: 'Website', main: 1, cell: (r) => h('div', { class: 'who' }, h('div', { class: `av sq ${tone(r.domain)}` }, r.domain[0].toUpperCase()), siteLink(r.domain)) },
           { label: 'Visits', num: 1, cell: (r) => fmt(r.visits) }, { label: 'Users', num: 1, cell: (r) => fmt(r.users) },
           { label: 'Total time', num: 1, cell: (r) => dur(r.totalMs) }, { label: 'Avg / visit', num: 1, cell: (r) => dur(r.avgMs) },
           { label: 'Last visit', cell: (r) => ago(r.lastVisit) }], d.rows, (r) => { location.hash = '#/websites/' + encodeURIComponent(r.domain); })));
@@ -255,7 +257,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
       try {
         const d = await api(`/users?${range()}&q=${encodeURIComponent(q)}&page=${page}&limit=25`);
         box.replaceChildren(h('div', { class: 'card' }, table([
-          { label: 'User', cell: (r) => h('div', { class: 'who' }, avatar(r.name), h('div', {}, h('b', {}, r.name), h('span', { class: 'sub' }, r.email || r.google_name || r.code || r.id))) },
+          { label: 'User', main: 1, cell: (r) => h('div', { class: 'who' }, avatar(r.name), h('div', {}, h('b', {}, r.name), h('span', { class: 'sub' }, r.email || r.google_name || r.code || r.id))) },
           { label: 'User ID', cell: (r) => r.code || r.id },
           { label: 'Last seen', cell: (r) => h('span', {}, h('i', { class: 'dot ' + (online(r) ? 'on' : '') }), online(r) ? 'Online' : ago(r.last_seen)) },
           { label: 'Visits', num: 1, cell: (r) => fmt(r.visits) }, { label: 'Browsing', num: 1, cell: (r) => dur(r.totalMs) }, { label: 'Sessions', num: 1, cell: (r) => dur(r.sessionMs) },
@@ -313,7 +315,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
           const d = await api(`${base}/history?${range()}&q=${encodeURIComponent(q)}&page=${page}&limit=50`);
           body.replaceChildren(h('div', { class: 'card' }, table([
             { label: 'When', cell: (r) => dt(r.visited_at) },
-            { label: 'Page', cls: 'url', cell: (r) => h('div', { class: 'who' }, h('div', { class: `av sq ${tone(r.domain)}` }, r.domain[0].toUpperCase()), h('div', {}, extLink(r.url, r.title || r.domain), h('div', { class: 'sub' }, r.url))) },
+            { label: 'Page', main: 1, cls: 'url', cell: (r) => h('div', { class: 'who' }, h('div', { class: `av sq ${tone(r.domain)}` }, r.domain[0].toUpperCase()), h('div', {}, extLink(r.url, r.title || r.domain), h('div', { class: 'sub' }, r.url))) },
             { label: 'Time spent', num: 1, cell: (r) => dur(r.duration_ms) },
             ...(can('delete_data') ? [{ label: '', cell: (r) => btn('trash', 'Delete', { class: 'bad', title: 'Delete this entry', onclick: async () => {
               if (!confirm('Delete this history entry?')) return;
@@ -347,7 +349,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
       try {
         const d = await api('/admins');
         box.replaceChildren(
-          h('div', { class: 'card' }, table([{ label: 'Admin', cell: (r) => h('div', { class: 'who' }, avatar(r.name || r.email), h('div', {}, h('b', {}, r.name), h('span', { class: 'sub' }, r.email))) },
+          h('div', { class: 'card' }, table([{ label: 'Admin', main: 1, cell: (r) => h('div', { class: 'who' }, avatar(r.name || r.email), h('div', {}, h('b', {}, r.name), h('span', { class: 'sub' }, r.email))) },
             { label: 'Role', cell: (r) => h('span', { class: 'pill ' + (r.role === 'superadmin' ? 'ok' : '') }, r.role) }, { label: 'Updated', cell: (r) => dt(r.created_at) },
             { label: 'Protected', cell: () => h('span', { class: 'pill ok' }, ico('lock'), 'Cannot be deleted here') }], d.rows)),
           card('Add or change admins', 'Roles are Firebase sign-in claims, so they are managed from your PC with the Admin SDK, never from a browser:',
@@ -415,16 +417,16 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
     const draw = () => {
       if (!d) return;
       if (tab === 'pages') body.replaceChildren(h('div', { class: 'card' }, h('p', { class: 'hint' }, 'Every different page opened on this website, most visited first.'), table([
-        { label: 'Page', cls: 'url', cell: (r) => h('div', {}, extLink(r.url, r.title || r.url), h('div', { class: 'sub' }, r.url)) },
+        { label: 'Page', main: 1, cls: 'url', cell: (r) => h('div', {}, extLink(r.url, r.title || r.url), h('div', { class: 'sub' }, r.url)) },
         { label: 'Visits', num: 1, cell: (r) => fmt(r.visits) }, { label: 'Users', num: 1, cell: (r) => fmt(r.users) },
         { label: 'Time', num: 1, cell: (r) => dur(r.totalMs) }, { label: 'Last opened', cell: (r) => ago(r.lastVisit) }], d.pages)));
       else if (tab === 'timeline') body.replaceChildren(h('div', { class: 'card' }, h('p', { class: 'hint' }, 'Everything opened on this website, newest first (up to 1,000).'), table([
         { label: 'When', cell: (r) => dt(r.visited_at) },
-        { label: 'Page', cls: 'url', cell: (r) => h('div', {}, extLink(r.url, r.title || r.url), h('div', { class: 'sub' }, r.url)) },
+        { label: 'Page', main: 1, cls: 'url', cell: (r) => h('div', {}, extLink(r.url, r.title || r.url), h('div', { class: 'sub' }, r.url)) },
         { label: 'User', cell: (r) => h('a', { href: '#/users/' + r.uid }, r.user) },
         { label: 'Time spent', num: 1, cell: (r) => dur(r.duration_ms) }], d.timeline)));
       else body.replaceChildren(h('div', { class: 'card' }, table([
-        { label: 'User', cell: (r) => h('div', { class: 'who' }, avatar(r.name), h('a', { href: '#/users/' + r.uid }, r.name)) },
+        { label: 'User', main: 1, cell: (r) => h('div', { class: 'who' }, avatar(r.name), h('a', { href: '#/users/' + r.uid }, r.name)) },
         { label: 'Visits', num: 1, cell: (r) => fmt(r.visits) }, { label: 'Time', num: 1, cell: (r) => dur(r.totalMs) }, { label: 'Last visit', cell: (r) => ago(r.lastVisit) }], d.byUser)));
     };
     const load = async () => {
@@ -448,12 +450,13 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
       prefs.set(key, v); e.currentTarget.parentNode.querySelectorAll('button').forEach((b) => b.classList.remove('on')); e.currentTarget.classList.add('on'); if (onSet) onSet(v);
     } }, l)));
     const setting = (title, hint, control) => h('div', { class: 'setting' }, h('div', {}, h('b', {}, title), h('div', { class: 'sub' }, hint)), control);
-    const link = (href, icon, title, hint) => h('a', { class: 'listrow', href }, h('div', { class: 'badge' }, ico(icon)), h('div', {}, h('b', {}, title), h('div', { class: 'sub' }, hint)), h('span', { class: 'go' }, ico('chev')));
+    const link = navRow;
     box.replaceChildren(
       card('Appearance and behaviour', null,
         setting('Theme', 'Match your device or force light or dark', seg('theme', [['auto', 'Auto'], ['light', 'Light'], ['dark', 'Dark']], applyTheme)),
         setting('Default date range', 'Used when you open the console', seg('range', [['7', '7 days'], ['30', '30 days'], ['90', '90 days']], (v) => { filter.preset = v; })),
         setting('Auto refresh', 'Reload the current page automatically', seg('auto', [['0', 'Off'], ['30', '30 s'], ['60', '60 s']], () => scheduleRefresh()))),
+      can('aggregate') ? h('div', { class: 'card list' }, h('h2', {}, 'Analytics'), h('div', { class: 'hint' }, 'More reports.'), link('#/sessions', 'clock', 'Sessions', 'How often and how long the browser is used')) : null,
       (can('manage_config') || can('manage_admins') || can('audit') || can('server_info'))
         ? h('div', { class: 'card list' }, h('h2', {}, 'Manage'), h('div', { class: 'hint' }, 'Control the phone app and see who has access.'),
             can('manage_config') ? link('#/config', 'gear', 'Firebase settings', 'Remote app settings and data retention') : null,
@@ -463,7 +466,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
         : null,
       h('div', { class: 'card list' }, h('h2', {}, 'Account'), h('div', { class: 'hint' }),
         link('#/account', 'user', 'My account', 'Change your password')),
-      card('Session', null, h('p', {}, h('b', {}, me.name || me.email), ' ', h('span', { class: 'pill' }, me.role)), h('div', { class: 'row' },
+      card('Signed in', null, h('p', {}, h('b', {}, me.name || me.email), ' ', h('span', { class: 'pill' }, me.role)), h('div', { class: 'row' },
         btn('out', 'Sign out', { class: 'bad', onclick: async () => { await api('/auth/logout', { method: 'POST' }); me = null; render(); } }))));
     return [h('div', {}), box, null];
   }
@@ -517,8 +520,10 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
     ['#/settings', 'Settings', 'Appearance, refresh and more', 'gear', viewSettings, 'aggregate', 'Account'],
   ];
   // bottom bar on phones: main areas + Settings (which lists the rest)
-  const TABS = [['#/', 'Overview', 'grid'], ['#/websites', 'Websites', 'globe'], ['#/sessions', 'Sessions', 'clock'], ['#/users', 'Users', 'users'], ['#/settings', 'Settings', 'gear']];
+  const TABS = [['#/', 'Overview', 'grid'], ['#/websites', 'Websites', 'globe'], ['#/users', 'Users', 'users'], ['#/settings', 'Settings', 'gear']];
   const SETTINGS_GROUP = ['#/settings', '#/admins', '#/server', '#/audit', '#/account', '#/config'];
+  // which bottom tab is highlighted for a given page (Sessions is reached from Overview)
+  const tabOf = (r) => (r === '#/sessions' ? '#/' : SETTINGS_GROUP.includes(r) ? '#/settings' : r);
 
   function loginView(msg) {
     const f = h('form', { onsubmit: async (e) => {
@@ -552,10 +557,33 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
     if (sec > 0) refreshTimer = setInterval(() => { if (me && currentLoad && !document.hidden) { refreshData(); currentLoad(); } }, sec * 1000);
   }
 
+  // ---------- motion helpers (class "fx" on <html> is on only while a page is first drawn) ----------
+  const html = document.documentElement;
+  let fxTimer = null, shellEl = null, tabbarEl = null, tabbarFor = null, lastHash = null;
+  const fxOn = () => { html.classList.add('fx'); clearTimeout(fxTimer); fxTimer = setTimeout(() => html.classList.remove('fx'), 5000); };
+  const fxOffSoon = () => { clearTimeout(fxTimer); fxTimer = setTimeout(() => html.classList.remove('fx'), 1500); };
+
+  function buildTabbar() {
+    const tabs = TABS.filter((t) => can(routes.find((r) => r[0] === t[0])[5]));
+    const el = h('div', { class: 'tabbar' }, h('i', { class: 'ind' }),
+      tabs.map(([href, label, icon]) => h('a', { href }, ico(icon), h('span', {}, label))));
+    el.style.setProperty('--n', tabs.length); el.style.setProperty('--i', -1);
+    el._tabs = tabs.map((t) => t[0]);
+    return el;
+  }
+  function setTab(el, page) {
+    const idx = el._tabs.indexOf(tabOf(page));
+    el.style.setProperty('--i', idx);
+    el.classList.toggle('none', idx < 0);
+    el.querySelectorAll('a').forEach((a, i) => a.classList.toggle('on', i === idx));
+  }
+
   async function render(msg) {
-    if (!me) { stopPresence(); clearInterval(refreshTimer); root.replaceChildren(loginView(typeof msg === 'string' ? msg : '')); return; }
+    if (!me) { stopPresence(); clearInterval(refreshTimer); shellEl = tabbarEl = tabbarFor = lastHash = null; root.replaceChildren(loginView(typeof msg === 'string' ? msg : '')); return; }
     startPresence();
     const hash = location.hash || '#/';
+    const hashChanged = hash !== lastHash; lastHash = hash;
+    if (hashChanged) fxOn();
     const uid = /^#\/users\/(.+)$/.exec(hash);
     const site = /^#\/websites\/(.+)$/.exec(hash);
     const route = uid ? ['#/users', 'User activity', 'Profile, history, sessions and searches', 'users', null, 'user_detail']
@@ -568,25 +596,28 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
       h('div', { class: 'sp' }),
       h('div', { class: 'me' }, avatar(me.name || me.email), h('div', {}, h('b', {}, me.name || me.email), h('span', {}, me.role)),
         h('button', { class: 'out', title: 'Sign out', onclick: async () => { await api('/auth/logout', { method: 'POST' }); me = null; render(); } }, ico('out'))));
-    const tabbar = h('div', { class: 'tabbar' }, TABS.filter((t) => can(routes.find((r) => r[0] === t[0])[5])).map(([href, label, icon]) => {
-      const on = href === route[0] || (href === '#/settings' && SETTINGS_GROUP.includes(route[0]));
-      return h('a', { href, class: on ? 'on' : '' }, ico(icon), h('span', {}, label));
-    }));
+    if (tabbarFor !== me) { tabbarEl = buildTabbar(); tabbarFor = me; shellEl = null; }
+    setTab(tabbarEl, route[0]);
     const box = h('div', {});
-    const refreshBtn = btn('refresh', 'Refresh', { onclick: () => { refreshData(); if (currentLoad) currentLoad(); else render(); } });
+    const refreshBtn = btn('refresh', 'Refresh', { onclick: () => { fxOn(); refreshData(); if (currentLoad) Promise.resolve(currentLoad()).finally(fxOffSoon); else render(); } });
     const top = h('div', { class: 'top' }, h('div', {}, h('h1', {}, route[1]), h('p', { class: 'subtitle' }, route[2])), refreshBtn);
     const main = h('main', {}, top);
-    root.replaceChildren(h('div', { class: 'shell' }, nav, main), tabbar);
+    const shell = h('div', { class: 'shell' }, nav, main);
+    // only swap the shell; the bottom bar stays in the page so its indicator can slide between tabs
+    if (shellEl && shellEl.parentNode === root) shellEl.replaceWith(shell); else root.replaceChildren(shell, tabbarEl);
+    shellEl = shell;
     currentLoad = null;
     if (!can(route[5])) { main.append(h('p', { class: 'err' }, 'Not permitted.')); return; }
     const [bar, content, load] = uid ? await viewUser(box, decodeURIComponent(uid[1]))
       : site ? await viewSite(box, decodeURIComponent(site[1])) : await route[4](h('div', {}));
-    if (uid) { top.replaceChildren(h('div', {}, h('a', { href: '#/users' }, '\u2190 All users'), h('h1', {}, 'User activity'), h('p', { class: 'subtitle' }, route[2])), refreshBtn); main.append(bar, box); }
-    else if (site) { top.replaceChildren(h('div', {}, h('a', { href: '#/websites' }, '\u2190 All websites'), h('h1', {}, decodeURIComponent(site[1])), h('p', { class: 'subtitle' }, route[2])), refreshBtn); main.append(bar, box); }
+    const back = (href, text) => h('a', { class: 'backlink', href }, ico('back'), text);
+    if (uid) { top.replaceChildren(h('div', {}, back('#/users', 'All users'), h('h1', {}, 'User activity'), h('p', { class: 'subtitle' }, route[2])), refreshBtn); main.append(bar, box); }
+    else if (site) { top.replaceChildren(h('div', {}, back('#/websites', 'All websites'), h('h1', {}, decodeURIComponent(site[1])), h('p', { class: 'subtitle' }, route[2])), refreshBtn); main.append(bar, box); }
     else main.append(bar, content);
     currentLoad = load || null; scheduleRefresh();
-    if (load) load();
-    window.scrollTo(0, 0);
+    if (!content.firstElementChild && !box.firstElementChild) content.replaceChildren(loading());
+    if (load) Promise.resolve(load()).finally(fxOffSoon); else fxOffSoon();
+    if (hashChanged) window.scrollTo(0, 0);
   }
 
   async function boot() {
@@ -595,36 +626,93 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
   }
   window.addEventListener('hashchange', () => { if (me) render(); });
   setupPullToRefresh();
+  setupMotion();
   boot();
 
   // ---------- pull-to-refresh: drag down from the very top of any page ----------
   function setupPullToRefresh() {
     const el = h('div', { class: 'ptr' }, ico('refresh'));
     document.body.appendChild(el);
-    const THRESHOLD = 64;
-    const atTop = () => (document.scrollingElement || document.documentElement).scrollTop <= 2;
-    let startY = 0, active = false, armed = false;
+    const THRESHOLD = 60;
+    const atTop = () => (document.scrollingElement || html).scrollTop <= 2;
+    let startY = 0, startX = 0, active = false, armed = false, busy = false;
+    const reset = () => { el.classList.remove('show', 'go'); el.style.transform = ''; };
     document.addEventListener('touchstart', (e) => {
-      armed = me != null && atTop() && e.touches.length === 1;
+      armed = me != null && !busy && atTop() && e.touches.length === 1;
       active = false;
-      if (armed) startY = e.touches[0].clientY;
+      if (armed) { startY = e.touches[0].clientY; startX = e.touches[0].clientX; }
     }, { passive: true });
     document.addEventListener('touchmove', (e) => {
       if (!armed) return;
-      const dy = e.touches[0].clientY - startY;
-      if (dy <= 0 || !atTop()) { armed = false; active = false; el.classList.remove('show', 'go'); el.style.transform = ''; return; }
+      const dy = e.touches[0].clientY - startY, dx = Math.abs(e.touches[0].clientX - startX);
+      if (dy <= 0 || !atTop() || (!active && dx > dy)) { armed = false; active = false; reset(); return; }
       active = true;
-      const d = Math.min(dy * 0.5, 92);
+      const d = Math.min(dy * 0.55, 96);
       el.classList.add('show');
       el.classList.toggle('go', d >= THRESHOLD);
-      el.style.transform = `translate(-50%,${d}px) rotate(${d * 3}deg)`;
+      el.style.transform = 'translate(-50%,' + d + 'px) rotate(' + (d * 3.2) + 'deg) scale(' + (0.7 + Math.min(d / THRESHOLD, 1) * 0.3) + ')';
     }, { passive: true });
-    const release = () => {
-      if (active && el.classList.contains('go')) { refreshData(); bustUsers(); if (currentLoad) currentLoad(); else render(); }
+    const release = async () => {
+      const fire = active && el.classList.contains('go');
       armed = false; active = false;
-      el.classList.remove('show', 'go'); el.style.transform = '';
+      if (!fire) { reset(); return; }
+      busy = true; fxOn();
+      el.classList.add('spin'); el.style.transform = 'translate(-50%,64px)';
+      refreshData(); bustUsers();
+      const t0 = Date.now();
+      try { if (currentLoad) await currentLoad(); else await render(); } catch { /* shown by the view */ }
+      await new Promise((r) => setTimeout(r, Math.max(0, 650 - (Date.now() - t0))));
+      el.classList.remove('spin'); reset(); busy = false; fxOffSoon();
     };
     document.addEventListener('touchend', release);
-    document.addEventListener('touchcancel', release);
+    document.addEventListener('touchcancel', () => { armed = false; active = false; if (!busy) reset(); });
+  }
+
+  // ---------- tap ripple + reveal on scroll + compact header on scroll ----------
+  function setupMotion() {
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const phone = matchMedia('(max-width:760px)');
+    // ripple on any tap target
+    document.addEventListener('pointerdown', (e) => {
+      if (reduce) return;
+      const t = e.target.closest && e.target.closest('button,.tabbar a,.listrow,nav a.item,tr.click');
+      if (!t || t.disabled || (t.matches('tr.click') && !phone.matches)) return;
+      const r = t.getBoundingClientRect(), size = Math.max(r.width, r.height) * 2;
+      const dot = h('span', { class: 'rip' });
+      dot.style.width = dot.style.height = size + 'px';
+      dot.style.left = (e.clientX - r.left - size / 2) + 'px';
+      dot.style.top = (e.clientY - r.top - size / 2) + 'px';
+      t.append(dot);
+      dot.addEventListener('animationend', () => dot.remove());
+    }, { passive: true });
+    // header gets compact + shadow once the page is scrolled
+    let ticking = false;
+    addEventListener('scroll', () => {
+      if (ticking) return; ticking = true;
+      requestAnimationFrame(() => { html.classList.toggle('scrolled', scrollY > 6); ticking = false; });
+    }, { passive: true });
+    // cards / rows / tiles fade and rise into place (staggered) when they enter the screen
+    if (reduce || !('IntersectionObserver' in window)) return;
+    const io = new IntersectionObserver((entries) => {
+      let n = 0;
+      for (const en of entries) {
+        if (!en.isIntersecting) continue;
+        const el = en.target; io.unobserve(el);
+        el.style.transitionDelay = Math.min(n++, 8) * 45 + 'ms';
+        el.classList.add('in');
+        setTimeout(() => { el.style.transitionDelay = ''; el.classList.remove('rv', 'in'); }, 900 + n * 45);
+      }
+    }, { threshold: 0.06 });
+    const SEL = '.card,.kpi,.listrow,tbody tr,.bar,.skeleton';
+    let queued = false;
+    const scan = () => {
+      queued = false;
+      for (const el of root.querySelectorAll(SEL)) {
+        if (el._seen) continue; el._seen = true;
+        const below = el.getBoundingClientRect().top > innerHeight;
+        if (below || html.classList.contains('fx')) { el.classList.add('rv'); io.observe(el); }
+      }
+    };
+    new MutationObserver(() => { if (!queued) { queued = true; requestAnimationFrame(scan); } }).observe(root, { childList: true, subtree: true });
   }
 })();
