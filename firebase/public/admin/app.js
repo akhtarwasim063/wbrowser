@@ -1,5 +1,5 @@
 // WBrowser Admin App (Firebase). Plain JS, no inline code (strict CSP). All dynamic text goes through textContent.
-import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watchPresence, bustUsers } from './fb.js';
+import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watchPresence, bustUsers, sendSignInLink, hasEmailLink, finishEmailLink, storedLinkEmail } from './fb.js';
 (() => {
   const root = document.getElementById('app');
   let me = null;
@@ -214,6 +214,8 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
     actions: [{ label: 'Cancel', value: () => false, cancel: true }, { label: risky(text) ? 'Delete' : 'Confirm', cls: risky(text) ? 'bad' : 'pri', value: () => true }] });
   const askType = (text) => dialogSheet({ icon: 'trash', tone: 'bad', title: 'Are you sure?', text, field: 'Type DELETE to confirm',
     actions: [{ label: 'Cancel', value: () => null, cancel: true }, { label: 'Delete', cls: 'bad', needs: (i) => i.value === 'DELETE', value: () => 'DELETE' }] });
+  const askEmail = () => dialogSheet({ icon: 'user', title: 'Confirm your email', text: 'Type the email address the sign-in link was sent to.', field: 'Your admin email',
+    actions: [{ label: 'Cancel', value: () => null, cancel: true }, { label: 'Continue', cls: 'pri', needs: (i) => i.value.includes('@'), value: (i) => i.value.trim() }] });
   const notify = (text, title) => {
     const bad = /fail|error|invalid|expired|too many|not permitted/i.test(String(text));
     return dialogSheet({ icon: bad ? 'pause' : 'check', tone: bad ? 'bad' : 'ok', title: title || (bad ? 'Something went wrong' : 'Done'), text: String(text), actions: [{ label: 'OK', cls: 'pri', value: () => true, cancel: true }] });
@@ -479,7 +481,13 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
     } }, h('h2', {}, 'Change password'), h('p', { class: 'hint' }, `Signed in as ${me.email} (${me.role}).`),
       h('div', { class: 'row' }, h('input', { name: 'current', type: 'password', placeholder: 'Current password', autocomplete: 'current-password', required: true }),
         h('input', { name: 'next', type: 'password', placeholder: 'New password (12+ chars)', autocomplete: 'new-password', required: true }), h('button', { class: 'pri' }, 'Update password')));
-    box.replaceChildren(form);
+    const recovery = !me.owner ? null : h('form', { class: 'card', onsubmit: async (e) => {
+      e.preventDefault(); const f = e.target;
+      try { await api('/auth/set-password', { method: 'POST', body: { next: f.next.value } }); f.reset(); notify('Password set. You can now sign in with it on the phone app too.'); }
+      catch (er) { notify(er.message === 'recent_login' ? 'For safety, sign in again with an emailed link first, then set the password.' : 'Failed: the new password needs 12+ characters.'); }
+    } }, h('h2', {}, 'Owner recovery: set a password'), h('p', { class: 'hint' }, 'After signing in with an emailed link there is no password yet. Set one here (no current password needed) so the phone app can sign in too.'),
+      h('div', { class: 'row' }, h('input', { name: 'next', type: 'password', placeholder: 'New password (12+ chars)', autocomplete: 'new-password', required: true }), h('button', { class: 'pri' }, 'Set password')));
+    box.replaceChildren(form, recovery);
     return [h('div', {}), box, null];
   }
 
@@ -616,6 +624,14 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
         catch (er) { notify(er.message === 'too_many_attempts' ? 'Too many requests. Try again later.' : er.message); }
         e.currentTarget.disabled = false;
       } }, 'Forgot password?'),
+      h('button', { type: 'button', class: 'link', onclick: async (e) => {
+        const email = f.email.value.trim();
+        if (!email) { f.email.focus(); notify('Type your admin email first, then tap this link.'); return; }
+        e.currentTarget.disabled = true;
+        try { await sendSignInLink(email); } catch (er) { if (er.code === 'auth/too-many-requests') { notify('Too many requests. Try again later.'); e.currentTarget.disabled = false; return; } }
+        notify('If that address belongs to the owner, a sign-in link has been sent. Open it in this browser.', 'Check your email');
+        e.currentTarget.disabled = false;
+      } }, 'Locked out? Email me a sign-in link'),
       h('p', { class: 'notice' }, 'Access is limited to authorised administrators. Activity is logged.'));
     return h('div', { class: 'auth' },
       h('div', { class: 'art' }, h('div', { class: 'brand' }, h('div', { class: 'logo' }, ico('shield')), h('span', {}, 'WBrowser Admin')),
@@ -697,6 +713,13 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
 
   async function boot() {
     try { me = await initFirebase(); } catch { me = null; }
+    let linkMsg = '';
+    if (hasEmailLink()) {
+      const em = storedLinkEmail() || await askEmail();
+      if (em) { try { me = await finishEmailLink(em); } catch { me = null; linkMsg = 'That sign-in link is invalid or has expired. Request a new one.'; } }
+      else history.replaceState(null, '', location.pathname + '#/');
+    }
+    if (linkMsg) { render(linkMsg); return; }
     render(configured() ? '' : 'Firebase is not configured yet: paste your web config into firebase-config.js and redeploy.');
   }
   window.addEventListener('hashchange', () => { if (me) render(); });

@@ -28,6 +28,8 @@ import kotlin.math.min
  * What an admin may read or delete is enforced by firestore.rules, not here.
  */
 class AdminRepo {
+    companion object { const val OWNER = "mybrowser.server@gmail.com" }
+
     class Forbidden : Exception("forbidden")
     class Protected : Exception("Admin accounts can never be erased from here.")
     class Weak : Exception("The new password needs at least 12 characters.")
@@ -41,8 +43,15 @@ class AdminRepo {
         "analyst" to setOf("aggregate", "user_list", "user_detail", "export", "server_info"),
     )
 
+    /**
+     * The owner (verified email) is ALWAYS the one superadmin, whatever the sign-in claim says, so recreating the
+     * Auth user (emailed sign-in link on the web console) restores full access. Any other account is at most an analyst.
+     * Keep OWNER in sync with firestore.rules (isBoss), public/admin/fb.js and scripts/set-role.js.
+     */
     private suspend fun loadMe(u: FirebaseUser, force: Boolean): Me {
-        val role = u.getIdToken(force).await().claims["role"] as? String
+        val claim = u.getIdToken(force).await().claims["role"] as? String
+        val owner = u.isEmailVerified && u.email.equals(OWNER, ignoreCase = true)
+        val role = when { owner -> "superadmin"; claim == "superadmin" -> "analyst"; else -> claim }
         val p = perms[role]
         if (role == null || p == null) { auth.signOut(); throw Forbidden() }
         adminEmail = u.email.orEmpty()

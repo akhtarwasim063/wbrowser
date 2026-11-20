@@ -61,6 +61,8 @@ fun LoginScreen(state: AuthState.SignedOut, onSignIn: (String, String) -> Unit, 
     var password by rememberSaveable { mutableStateOf("") }
     var show by rememberSaveable { mutableStateOf(false) }
     val focus = LocalFocusManager.current
+    val openLink = rememberOpenLink()
+    val webUrl = "https://" + dev.wbrowser.admin.BuildConfig.FIREBASE_PROJECT_ID + ".web.app/admin/"
     val fieldColors = OutlinedTextFieldDefaults.colors(
         focusedBorderColor = p.pri, unfocusedBorderColor = p.glassRimBottom.copy(alpha = 0.5f),
         focusedContainerColor = p.glassFill, unfocusedContainerColor = p.glassFill,
@@ -125,6 +127,9 @@ fun LoginScreen(state: AuthState.SignedOut, onSignIn: (String, String) -> Unit, 
                     }
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                         TextButton(onClick = { focus.clearFocus(); onForgot(email) }, enabled = !state.busy) { Text("Forgot password?", color = p.pri, fontWeight = FontWeight.SemiBold, fontSize = 13.sp) }
+                    }
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        TextButton(onClick = { openLink(webUrl) }) { Text("Locked out? Recover on the web console", color = p.mut, fontSize = 12.sp) }
                     }
                 }
             }
