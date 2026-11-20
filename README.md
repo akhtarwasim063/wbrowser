@@ -8,6 +8,24 @@ This is a personal project. It is committed and pushed only with the personal Gi
 (`akhtarwasim063`), never with any office/work identity, per the owner's machine-wide policy recorded in
 `D:\TempWork\GITHUB_RULES.md` (not part of this repo; a local note for the owner's own future reference).
 
+## Branching strategy
+
+| Branch | Purpose |
+|---|---|
+| `production` | Stable, release-ready code only. Nothing is committed here directly. |
+| `development` | Integration branch. All new work is merged here first and tested. |
+| `feature/<name>` | One branch per new feature or fix, always created from `development`. |
+| `main` | Default GitHub branch. Kept in sync with `production`. |
+
+Workflow:
+1. `git checkout development && git pull`
+2. `git checkout -b feature/<name>`: write the code, commit.
+3. Merge the feature into `development` (pull request), test it.
+4. When `development` is stable, merge it into `production`, then fast-forward `main` to `production`.
+5. Hotfixes: branch from `production` as `hotfix/<name>`, merge into `production` and back into `development`.
+
+Current feature branch: `feature/background-playback-pip` (background playback, PiP mini-player).
+
 ## Run
     flutter run                      # Android device/emulator
     flutter build apk --debug
