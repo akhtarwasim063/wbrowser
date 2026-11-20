@@ -11,7 +11,7 @@ This repo holds **two separate Gradle projects**. Do not open the repo root. Ope
 1. **JDK**: Settings > Build, Execution, Deployment > Build Tools > Gradle > Gradle JDK = JetBrains Runtime 17 or newer.
 2. **Android SDK**: `local.properties` is created by Android Studio (`sdk.dir=...`). It is not committed.
 3. **Firebase (WBrowser only)**: put your `google-services.json` in `native_android/app/` (it is not committed). See `firebase/README.md`.
-4. **Admin app only**: set `ADMIN_URL=https://<project>.web.app/admin/` in `admin_android/gradle.properties`, or pass `-PADMIN_URL=...` to Gradle.
+4. **Admin app only**: nothing to set. It is native and signs in to Firebase directly (project IDs are in `admin_android/app/build.gradle.kts`; override with `-PFIREBASE_PROJECT_ID=...` etc. for another project).
 5. Connect a phone with USB debugging, or create an emulator in Device Manager.
 
 ## After cloning: sync, then run

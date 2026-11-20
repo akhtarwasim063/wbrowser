@@ -1,7 +1,7 @@
 // Data layer for the Admin App on Firebase. api(path, opts) mimics the old REST API so the views stay the same,
 // but everything runs in the browser against Firestore; firestore.rules is what enforces who can read or delete.
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
-import { getAuth, connectAuthEmulator, signInWithEmailAndPassword, signOut, onAuthStateChanged, EmailAuthProvider, reauthenticateWithCredential, updatePassword, sendPasswordResetEmail }
+import { getAuth, connectAuthEmulator, signInWithEmailAndPassword, signOut, onAuthStateChanged, EmailAuthProvider, reauthenticateWithCredential, updatePassword, sendPasswordResetEmail, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink }
   from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 import { getFirestore, connectFirestoreEmulator, collection, collectionGroup, query, where, orderBy, limit, startAfter, getDocs, getDoc, doc, updateDoc, setDoc, writeBatch, addDoc, getCountFromServer, onSnapshot }
   from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
@@ -11,6 +11,9 @@ const PERMS = {
   superadmin: ['aggregate', 'user_list', 'user_detail', 'export', 'manage_users', 'manage_admins', 'audit', 'delete_data', 'server_info', 'manage_config'],
   analyst: ['aggregate', 'user_list', 'user_detail', 'export', 'server_info'],
 };
+// The owner is the one permanent superadmin (see firestore.rules isBoss()). Same email, verified, is superadmin everywhere.
+const OWNER = 'mybrowser.server@gmail.com';
+const isOwnerUser = (u) => !!u && (u.email || '').toLowerCase() === OWNER && u.emailVerified === true;
 const MAX_QUERY = 10000;  // Firestore rejects any query limit above 10,000
 const MAX_DOCS = 30000;   // dashboards aggregate in the browser; this keeps queries bounded
 
@@ -39,9 +42,11 @@ export function initFirebase() {
 
 async function loadMe(u, force = false) {
   const t = await u.getIdTokenResult(force);
-  const role = t.claims.role;
+  const owner = isOwnerUser(u);
+  let role = owner ? 'superadmin' : t.claims.role;
+  if (role === 'superadmin' && !owner) role = 'analyst';      // there is exactly one superadmin
   if (!PERMS[role]) { await signOut(auth); throw err('forbidden'); }
-  me = { email: u.email, name: u.displayName || u.email, role, permissions: PERMS[role], uid: u.uid };
+  me = { email: u.email, name: u.displayName || u.email, role, permissions: PERMS[role], uid: u.uid, owner };
   // self-heal: if the Admins-list record was deleted, put it back (access never depended on it)
   getDoc(doc(db, 'admins', u.uid)).then((s) => { if (!s.exists()) return setDoc(doc(db, 'admins', u.uid), { email: u.email, name: me.name, role, updatedAt: Date.now() }); }).catch(() => {});
   return me;
@@ -49,6 +54,25 @@ async function loadMe(u, force = false) {
 
 const audit = (action, target, detail = '') =>
   addDoc(collection(db, 'audit'), { at: Date.now(), by: me.email, action, target: String(target || ''), detail: String(detail).slice(0, 300) }).catch(() => {});
+
+// ---------- owner recovery: sign in with an emailed link (works even if the Auth user was deleted) ----------
+const LINK_KEY = 'wba_link_email';
+export async function sendSignInLink(email) {
+  const e = String(email || '').trim().toLowerCase();
+  if (e !== OWNER) return;                       // only the owner has this path; the caller always shows the same message
+  await sendSignInLinkToEmail(auth, e, { url: location.origin + location.pathname, handleCodeInApp: true });
+  try { localStorage.setItem(LINK_KEY, e); } catch { /* ignore */ }
+}
+export const hasEmailLink = () => !!auth && isSignInWithEmailLink(auth, location.href);
+export const storedLinkEmail = () => { try { return localStorage.getItem(LINK_KEY) || ''; } catch { return ''; } };
+export async function finishEmailLink(email) {
+  const e = String(email || '').trim().toLowerCase();
+  if (e !== OWNER) throw err('invalid_credentials');
+  await signInWithEmailLink(auth, e, location.href);
+  try { localStorage.removeItem(LINK_KEY); } catch { /* ignore */ }
+  history.replaceState(null, '', location.pathname + '#/');
+  return loadMe(auth.currentUser, true);
+}
 
 // ---------- caches ----------
 const cache = new Map();
@@ -164,6 +188,12 @@ export async function api(path, opts = {}) {
     } catch (e) { throw err(e.message === 'weak_password' ? 'weak_password' : 'invalid_credentials'); }
   }
   if (!me) throw err('unauthorized');
+  if (pathname === '/auth/set-password') {         // owner only: used right after an email-link sign-in (no current password exists)
+    if (!me.owner) throw err('forbidden');
+    if (!opts.body.next || opts.body.next.length < 12) throw err('weak_password');
+    try { await updatePassword(auth.currentUser, opts.body.next); return { ok: true }; }
+    catch (e) { throw err(e.code === 'auth/requires-recent-login' ? 'recent_login' : 'failed'); }
+  }
 
   const view0 = (u) => ({ id: u.uid, code: u.userId, name: u.name, email: u.email || null, last_seen: ts(u.lastSeen) || null, online: u.online === true, status: u.status });
   // ----- aggregates -----
@@ -269,6 +299,11 @@ export async function api(path, opts = {}) {
         if ((await getDoc(doc(db, 'admins', uid))).exists()) throw err('protected_admin');   // admin accounts can never be erased
         for (const c of ['visits', 'searches', 'sessions']) await wipeSub(uid, c); const b = writeBatch(db); b.delete(doc(db, 'users', uid)); await b.commit(); await audit('erase_user', uid); }
       else if (subId) { const b = writeBatch(db); b.delete(doc(db, 'users', uid, sub === 'history' ? 'visits' : sub, subId)); await b.commit(); deleted = 1; await audit(sub === 'history' ? 'delete_visit' : 'delete_search', uid, subId); }
+      else if ((sub === 'history' || sub === 'searches') && Array.isArray(opts.body?.ids)) {   // multi-select delete
+        const col = sub === 'history' ? 'visits' : 'searches'; const ids = opts.body.ids.map(String);
+        for (let i = 0; i < ids.length; i += 400) { const b = writeBatch(db); ids.slice(i, i + 400).forEach((id) => b.delete(doc(db, 'users', uid, col, id))); await b.commit(); }
+        deleted = ids.length; await audit(sub === 'history' ? 'delete_visits' : 'delete_searches', uid, `${deleted} entries`);
+      }
       else if (sub === 'history') { deleted = await wipeSub(uid, 'visits'); await wipeSub(uid, 'sessions'); await audit('clear_user_history', uid, `${deleted} visits`); }
       else if (sub === 'searches') { deleted = await wipeSub(uid, 'searches'); await audit('clear_user_searches', uid, `${deleted} searches`); }
       bust(); return { ok: true, deleted };

@@ -18,6 +18,10 @@ async function askHidden(prompt) {
   if (!email || !['superadmin', 'analyst', 'none'].includes(role)) {
     console.error('Usage: node scripts/set-role.js <email> <superadmin|analyst|none> ["Name"]'); process.exit(1);
   }
+  // exactly one permanent superadmin: the owner (see firestore.rules isBoss())
+  const OWNER = 'mybrowser.server@gmail.com';
+  if (role === 'superadmin' && email.toLowerCase() !== OWNER) { console.error('Only ' + OWNER + ' can be superadmin. Give everyone else analyst.'); process.exit(1); }
+  if (email.toLowerCase() === OWNER && role !== 'superadmin') { console.error('The owner is always superadmin and cannot be changed or removed (run restore-owner.js to repair).'); process.exit(1); }
   admin.initializeApp();
   const auth = admin.auth(), db = admin.firestore();
   let user;

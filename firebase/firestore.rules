@@ -10,8 +10,13 @@ service cloud.firestore {
 
     function signedIn() { return request.auth != null; }
     function role() { return signedIn() && 'role' in request.auth.token ? request.auth.token.role : ''; }
-    function isAdmin() { return role() in ['superadmin', 'analyst']; }
-    function isSuper() { return role() == 'superadmin'; }
+    // The owner (the Gmail account this Firebase project belongs to) is ALWAYS the one and only superadmin, whatever the
+    // sign-in claim or the admins records say, so deleting the Auth user or the admins record can never lock the owner out
+    // (signing in again with an emailed link brings the same email back). A VERIFIED email is required, so nobody can
+    // register that address as a password account and use it. Any other account with a superadmin claim is only an analyst.
+    function isBoss() { return signedIn() && request.auth.token.email == 'mybrowser.server@gmail.com' && request.auth.token.email_verified == true; }
+    function isAdmin() { return isBoss() || role() in ['superadmin', 'analyst']; }
+    function isSuper() { return isBoss(); }
     function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
     function profile(uid) { return get(/databases/$(database)/documents/users/$(uid)).data; }
     // the user must exist, be active and have agreed to activity sharing
@@ -95,7 +100,8 @@ service cloud.firestore {
     // The record only feeds the Admins list; an admin can re-create their own (matching their claims) but never edit or delete it.
     match /admins/{uid} {
       allow read: if isOwner(uid) || isSuper();
-      allow create: if isOwner(uid) && isAdmin() && request.resource.data.role == role() && request.resource.data.email == request.auth.token.email;
+      allow create: if isOwner(uid) && isAdmin() && request.resource.data.email == request.auth.token.email
+        && request.resource.data.role == (isBoss() ? 'superadmin' : (role() == 'superadmin' ? 'analyst' : role()));
       allow update, delete: if false;
     }
 

@@ -1,5 +1,5 @@
 // WBrowser Admin App (Firebase). Plain JS, no inline code (strict CSP). All dynamic text goes through textContent.
-import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watchPresence, bustUsers } from './fb.js';
+import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watchPresence, bustUsers, sendSignInLink, hasEmailLink, finishEmailLink, storedLinkEmail } from './fb.js';
 (() => {
   const root = document.getElementById('app');
   let me = null;
@@ -127,7 +127,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
   let gid = 0;
   function areaChart(rows, key, label, cls = '') {
     if (!rows.length) return h('div', { class: 'empty' }, 'No data in this range.');
-    const W = 640, H = 200, L = 40, R = 10, T = 12, B = 26;
+    const W = 640, H = 150, L = 40, R = 10, T = 10, B = 24;
     const max = Math.max(1, ...rows.map((r) => r[key] || 0));
     const nice = Math.ceil(max / 4) * 4 || 4;
     const x = (i) => L + (rows.length === 1 ? (W - L - R) / 2 : (i * (W - L - R)) / (rows.length - 1));
@@ -154,7 +154,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
   }
 
   function colChart(rows, key, label, xl) {
-    const W = 640, H = 170, L = 34, B = 24, T = 8;
+    const W = 640, H = 130, L = 34, B = 22, T = 8;
     const max = Math.max(1, ...rows.map((r) => r[key] || 0));
     const bw = (W - L) / rows.length;
     const svg = s('svg', { class: 'chart', viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': label });
@@ -194,6 +194,86 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
   const card = (title, hint, ...body) => h('div', { class: 'card' }, h('h2', {}, title), hint ? h('p', { class: 'hint' }, hint) : h('div', { class: 'hint' }), body);
   const navRow = (href, icon, title, hint) => h('a', { class: 'listrow', href }, h('div', { class: 'badge' }, ico(icon)), h('div', {}, h('b', {}, title), h('div', { class: 'sub' }, hint)), h('span', { class: 'go' }, ico('chev')));
   const searchBox = (placeholder, on) => h('div', { class: 'search' }, ico('search'), h('input', { placeholder, oninput: (e) => on(e.target.value) }));
+
+
+  // ---------- bottom-sheet dialogs (replace the browser's confirm / alert / prompt) ----------
+  function dialogSheet({ icon, tone = '', title, text, field, actions }) {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (v) => { if (done) return; done = true; ov.classList.add('out'); setTimeout(() => ov.remove(), 190); resolve(v); };
+      const input = field ? h('input', { placeholder: field, autocomplete: 'off', autocapitalize: 'off', oninput: () => sync() }) : null;
+      const btns = actions.map((a) => h('button', { class: a.cls || '', onclick: () => finish(a.value(input)) }, a.label));
+      const sync = () => actions.forEach((a, i) => { if (a.needs) btns[i].disabled = !a.needs(input); });
+      const ov = h('div', { class: 'overlay', onclick: (e) => { if (e.target === ov) finish(actions.find((a) => a.cancel).value(input)); } },
+        h('div', { class: 'sheet dlg' }, h('div', { class: 'dico ' + tone }, ico(icon)), h('h3', {}, title), h('p', {}, text), input, h('div', { class: 'row2' }, btns)));
+      document.body.append(ov); sync(); input?.focus();
+    });
+  }
+  const risky = (t) => /delete|erase|clear|permanently/i.test(t);
+  const ask = (text, title) => dialogSheet({ icon: risky(text) ? 'trash' : 'check', tone: risky(text) ? 'bad' : '', title: title || (risky(text) ? 'Are you sure?' : 'Please confirm'), text,
+    actions: [{ label: 'Cancel', value: () => false, cancel: true }, { label: risky(text) ? 'Delete' : 'Confirm', cls: risky(text) ? 'bad' : 'pri', value: () => true }] });
+  const askType = (text) => dialogSheet({ icon: 'trash', tone: 'bad', title: 'Are you sure?', text, field: 'Type DELETE to confirm',
+    actions: [{ label: 'Cancel', value: () => null, cancel: true }, { label: 'Delete', cls: 'bad', needs: (i) => i.value === 'DELETE', value: () => 'DELETE' }] });
+  const askEmail = () => dialogSheet({ icon: 'user', title: 'Confirm your email', text: 'Type the email address the sign-in link was sent to.', field: 'Your admin email',
+    actions: [{ label: 'Cancel', value: () => null, cancel: true }, { label: 'Continue', cls: 'pri', needs: (i) => i.value.includes('@'), value: (i) => i.value.trim() }] });
+  const notify = (text, title) => {
+    const bad = /fail|error|invalid|expired|too many|not permitted/i.test(String(text));
+    return dialogSheet({ icon: bad ? 'pause' : 'check', tone: bad ? 'bad' : 'ok', title: title || (bad ? 'Something went wrong' : 'Done'), text: String(text), actions: [{ label: 'OK', cls: 'pri', value: () => true, cancel: true }] });
+  };
+
+  // ---------- press and hold: select rows, then delete several at once ----------
+  let sel = null, selBar = null;
+  function endSelect() { sel = null; selBar?.remove(); selBar = null; document.querySelectorAll('.overlay').forEach((o) => o.remove()); document.querySelectorAll('.selecting').forEach((e) => e.classList.remove('selecting')); }
+  function updateBar() {
+    if (!selBar) return;
+    selBar.querySelector('b').textContent = sel.size + ' selected';
+    selBar.querySelector('.del').disabled = sel.size === 0;
+  }
+  function openSheet(title, items) {
+    const close = () => ov.remove();
+    const ov = h('div', { class: 'overlay', onclick: (e) => { if (e.target === ov) close(); } },
+      h('div', { class: 'sheet' }, h('div', { class: 't' }, title),
+        items.map(([icon, label, cls, fn]) => btn(icon, label, { class: cls || '', onclick: () => { close(); fn(); } })),
+        h('button', { onclick: close }, 'Cancel')));
+    document.body.append(ov);
+  }
+  function selectable(box, rows, kind, base, reload) {
+    const trs = [...box.querySelectorAll('tbody tr')];
+    const del = async (ids) => {
+      if (!ids.length || !await ask(`Delete ${ids.length} ${ids.length === 1 ? 'entry' : 'entries'}?`)) return;
+      try { await api(`${base}/${kind}`, { method: 'DELETE', body: { ids } }); endSelect(); reload(); } catch (er) { notify(er.message); }
+    };
+    const startSelect = (firstId) => {
+      sel = new Set([firstId]);
+      box.classList.add('selecting');
+      trs.forEach((tr, i) => tr.classList.toggle('picked', rows[i] && sel.has(rows[i].id)));
+      selBar?.remove();
+      selBar = h('div', { class: 'selbar' }, h('b', {}, ''),
+        h('button', { onclick: () => { sel = sel.size === rows.length ? new Set() : new Set(rows.map((r) => r.id)); trs.forEach((tr, i) => tr.classList.toggle('picked', rows[i] && sel.has(rows[i].id))); updateBar(); } }, 'All'),
+        btn('trash', 'Delete', { class: 'bad del', onclick: () => del([...sel]) }),
+        h('button', { onclick: () => { endSelect(); trs.forEach((tr) => tr.classList.remove('picked')); } }, 'Done'));
+      document.body.append(selBar); updateBar();
+    };
+    trs.forEach((tr, i) => {
+      const r = rows[i]; if (!r) return;
+      tr.classList.add('sel-row');
+      let timer = 0, sx = 0, sy = 0, fired = false;
+      const fire = () => {
+        fired = true; navigator.vibrate?.(15);
+        if (sel) { sel.has(r.id) ? sel.delete(r.id) : sel.add(r.id); tr.classList.toggle('picked', sel.has(r.id)); updateBar(); return; }
+        if (!can('delete_data')) return;
+        openSheet(r.title || r.query || r.url || 'Entry', [['check', 'Select multiple', '', () => startSelect(r.id)], ['trash', 'Delete this one', 'bad', () => del([r.id])]]);
+      };
+      tr.addEventListener('pointerdown', (e) => { fired = false; sx = e.clientX; sy = e.clientY; clearTimeout(timer); timer = setTimeout(fire, 450); });
+      tr.addEventListener('pointermove', (e) => { if (Math.abs(e.clientX - sx) > 8 || Math.abs(e.clientY - sy) > 8) clearTimeout(timer); });
+      ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => tr.addEventListener(ev, () => clearTimeout(timer)));
+      tr.addEventListener('contextmenu', (e) => { e.preventDefault(); clearTimeout(timer); fire(); });
+      tr.addEventListener('click', (e) => {
+        if (fired) { fired = false; e.preventDefault(); e.stopPropagation(); return; }
+        if (sel) { e.preventDefault(); e.stopPropagation(); sel.has(r.id) ? sel.delete(r.id) : sel.add(r.id); tr.classList.toggle('picked', sel.has(r.id)); updateBar(); }
+      }, true);
+    });
+  }
 
   // ---------- views ----------
   async function viewOverview(box) {
@@ -279,17 +359,17 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
         if (can('manage_users')) {
           actions.append(
             btn('pause', u.status === 'active' ? 'Suspend uploads' : 'Reactivate', { onclick: async () => { await api(`/users/${id}`, { method: 'PATCH', body: { status: u.status === 'active' ? 'suspended' : 'active' } }); loadHead(); } }),
-            btn('trash', 'Erase user', { class: 'bad', onclick: async () => { if (confirm(`Permanently erase ${u.name} and all their data?`)) { await api(`/users/${id}`, { method: 'DELETE' }); location.hash = '#/users'; } } }));
+            btn('trash', 'Erase user', { class: 'bad', onclick: async () => { if (await ask(`Permanently erase ${u.name} and all their data?`)) { await api(`/users/${id}`, { method: 'DELETE' }); location.hash = '#/users'; } } }));
         }
         if (can('delete_data')) {
           const wipe = (what, path, msg) => btn('trash', `Clear ${what}`, { class: 'bad', onclick: async () => {
-            if (!confirm(msg)) return;
-            try { const r = await api(path, { method: 'DELETE' }); alert(`Deleted ${r.deleted} ${what}.`); loadHead(); loadBody(); } catch (er) { alert(er.message); }
+            if (!await ask(msg)) return;
+            try { const r = await api(path, { method: 'DELETE' }); notify(`Deleted ${r.deleted} ${what}.`); loadHead(); loadBody(); } catch (er) { notify(er.message); }
           } });
           actions.append(wipe('history', `/users/${encodeURIComponent(id)}/history`, `Delete ALL browsing history and sessions of ${u.name}?`),
             wipe('searches', `/users/${encodeURIComponent(id)}/searches`, `Delete ALL search queries of ${u.name}?`));
         }
-        if (can('export')) actions.append(btn('download', 'Export CSV', { onclick: async () => { try { await csvDownload(id, range()); } catch (er) { alert(er.message); } } }));
+        if (can('export')) actions.append(btn('download', 'Export CSV', { onclick: async () => { try { await csvDownload(id, range()); } catch (er) { notify(er.message); } } }));
         head.replaceChildren(
           h('div', { class: 'card' }, h('div', { class: 'hero' }, avatar(u.name, 'lg'),
             h('div', { class: 'info' }, h('h2', {}, u.name), h('div', { class: 'sub' }, `${u.code || u.id}${u.email ? ' · ' + u.email : ''}`),
@@ -313,27 +393,23 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
         const base = `/users/${encodeURIComponent(id)}`;
         if (tab === 'history') {
           const d = await api(`${base}/history?${range()}&q=${encodeURIComponent(q)}&page=${page}&limit=50`);
-          body.replaceChildren(h('div', { class: 'card' }, table([
+          const card = h('div', { class: 'card' }, table([
             { label: 'When', cell: (r) => dt(r.visited_at) },
             { label: 'Page', main: 1, cls: 'url', cell: (r) => h('div', { class: 'who' }, h('div', { class: `av sq ${tone(r.domain)}` }, r.domain[0].toUpperCase()), h('div', {}, extLink(r.url, r.title || r.domain), h('div', { class: 'sub' }, r.url))) },
-            { label: 'Time spent', num: 1, cell: (r) => dur(r.duration_ms) },
-            ...(can('delete_data') ? [{ label: '', cell: (r) => btn('trash', 'Delete', { class: 'bad', title: 'Delete this entry', onclick: async () => {
-              if (!confirm('Delete this history entry?')) return;
-              try { await api(`${base}/history/${encodeURIComponent(r.id)}`, { method: 'DELETE' }); loadBody(); loadHead(); } catch (er) { alert(er.message); }
-            } }) }] : [])], d.rows), pager(page, d.total, 50, (p) => { page = p; loadBody(); })));
+            { label: 'Time spent', num: 1, cell: (r) => dur(r.duration_ms) }], d.rows), pager(page, d.total, 50, (p) => { page = p; loadBody(); }));
+          body.replaceChildren(can('delete_data') ? h('p', { class: 'hintline' }, 'Tip: press and hold an entry to select or delete.') : null, card);
+          selectable(card, d.rows, 'history', base, () => { loadBody(); loadHead(); });
         } else if (tab === 'sessions') {
           const d = await api(`${base}/sessions?${range()}&limit=100`);
           body.replaceChildren(h('div', { class: 'card' }, table([{ label: 'Started', cell: (r) => dt(r.started_at) }, { label: 'Ended', cell: (r) => dt(r.ended_at) }, { label: 'Duration', num: 1, cell: (r) => dur(r.duration_ms) }], d.rows)));
         } else {
           const d = await api(`${base}/searches?${range()}&limit=100`);
-          body.replaceChildren(h('div', { class: 'card' }, d.consent ? null : h('p', { class: 'hint' }, 'This user has not enabled search-query sharing.'),
+          const card = h('div', { class: 'card' }, d.consent ? null : h('p', { class: 'hint' }, 'This user has not enabled search-query sharing.'),
             table([{ label: 'When', cell: (r) => dt(r.searched_at) },
-              { label: 'Query', cell: (r) => extLink('https://www.google.com/search?q=' + encodeURIComponent(r.query), r.query) },
-              { label: 'Engine', cell: (r) => r.engine || '' },
-              ...(can('delete_data') ? [{ label: '', cell: (r) => btn('trash', 'Delete', { class: 'bad', title: 'Delete this search', onclick: async () => {
-                if (!confirm('Delete this search query?')) return;
-                try { await api(`${base}/searches/${encodeURIComponent(r.id)}`, { method: 'DELETE' }); loadBody(); } catch (er) { alert(er.message); }
-              } }) }] : [])], d.rows)));
+              { label: 'Query', main: 1, cell: (r) => extLink('https://www.google.com/search?q=' + encodeURIComponent(r.query), r.query) },
+              { label: 'Engine', cell: (r) => r.engine || '' }], d.rows));
+          body.replaceChildren(can('delete_data') ? h('p', { class: 'hintline' }, 'Tip: press and hold an entry to select or delete.') : null, card);
+          selectable(card, d.rows, 'searches', base, () => { loadBody(); });
         }
       } catch (e) { body.replaceChildren(errBox(e)); }
     };
@@ -366,10 +442,10 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
         const d = await api('/server-info');
         const row = (k, v) => h('tr', {}, h('th', {}, k), h('td', {}, v));
         const danger = (scope, label) => btn('trash', `Clear ${label}`, { class: 'bad', onclick: async (e) => {
-          const w = prompt(`This permanently deletes ${label} for ALL users. Type DELETE to confirm:`);
+          const w = await askType(`This permanently deletes ${label} for ALL users. Type DELETE to confirm:`);
           if (w !== 'DELETE') return;
           e.currentTarget.disabled = true;
-          try { const r = await api('/data', { method: 'DELETE', body: { scope, confirm: 'DELETE' } }); alert('Deleted: ' + JSON.stringify(r.deleted)); } catch (er) { alert(er.message); }
+          try { const r = await api('/data', { method: 'DELETE', body: { scope, confirm: 'DELETE' } }); notify('Deleted: ' + JSON.stringify(r.deleted)); } catch (er) { notify(er.message); }
           load();
         } });
         box.replaceChildren(
@@ -400,12 +476,18 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
   async function viewAccount(box) {
     const form = h('form', { class: 'card', onsubmit: async (e) => {
       e.preventDefault(); const f = e.target;
-      try { await api('/auth/change-password', { method: 'POST', body: { current: f.current.value, next: f.next.value } }); f.reset(); alert('Password changed.'); }
-      catch (er) { alert('Failed: ' + er.message + ' (new password needs 12+ characters)'); }
+      try { await api('/auth/change-password', { method: 'POST', body: { current: f.current.value, next: f.next.value } }); f.reset(); notify('Password changed.'); }
+      catch (er) { notify('Failed: ' + er.message + ' (new password needs 12+ characters)'); }
     } }, h('h2', {}, 'Change password'), h('p', { class: 'hint' }, `Signed in as ${me.email} (${me.role}).`),
       h('div', { class: 'row' }, h('input', { name: 'current', type: 'password', placeholder: 'Current password', autocomplete: 'current-password', required: true }),
         h('input', { name: 'next', type: 'password', placeholder: 'New password (12+ chars)', autocomplete: 'new-password', required: true }), h('button', { class: 'pri' }, 'Update password')));
-    box.replaceChildren(form);
+    const recovery = !me.owner ? null : h('form', { class: 'card', onsubmit: async (e) => {
+      e.preventDefault(); const f = e.target;
+      try { await api('/auth/set-password', { method: 'POST', body: { next: f.next.value } }); f.reset(); notify('Password set. You can now sign in with it on the phone app too.'); }
+      catch (er) { notify(er.message === 'recent_login' ? 'For safety, sign in again with an emailed link first, then set the password.' : 'Failed: the new password needs 12+ characters.'); }
+    } }, h('h2', {}, 'Owner recovery: set a password'), h('p', { class: 'hint' }, 'After signing in with an emailed link there is no password yet. Set one here (no current password needed) so the phone app can sign in too.'),
+      h('div', { class: 'row' }, h('input', { name: 'next', type: 'password', placeholder: 'New password (12+ chars)', autocomplete: 'new-password', required: true }), h('button', { class: 'pri' }, 'Set password')));
+    box.replaceChildren(form, recovery);
     return [h('div', {}), box, null];
   }
 
@@ -481,7 +563,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
         const num = (k, min, max) => h('input', { type: 'number', min, max, value: st[k], oninput: (e) => { st[k] = e.target.value; } });
         const row = (title, hint, control) => h('div', { class: 'setting' }, h('div', {}, h('b', {}, title), h('div', { class: 'sub' }, hint)), control);
         const ann = h('input', { type: 'text', maxlength: 200, value: st.announcement, placeholder: 'Shown inside the phone app (optional)', oninput: (e) => { st.announcement = e.target.value; } });
-        const save = btn('check', 'Save settings', { class: 'pri', onclick: async (e) => { e.currentTarget.disabled = true; try { await api('/config', { method: 'PUT', body: st }); alert('Saved. Phones pick this up at their next sync.'); } catch (er) { alert(er.message); } load(); } });
+        const save = btn('check', 'Save settings', { class: 'pri', onclick: async (e) => { e.currentTarget.disabled = true; try { await api('/config', { method: 'PUT', body: st }); notify('Saved. Phones pick this up at their next sync.'); } catch (er) { notify(er.message); } load(); } });
         box.replaceChildren(
           card('Remote app settings', 'Saved in Firebase. Every phone reads these at its next sync, and the security rules enforce the first two switches even if an app ignored them.',
             row('Collect browsing activity', 'Off = every phone stops uploading immediately (kill switch)', onoff(st.trackingEnabled, (v) => { st.trackingEnabled = v; })),
@@ -493,9 +575,9 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
           card('Delete old data', 'Permanently deletes visits, sessions and searches older than the retention period for every user.',
             h('div', { class: 'row' }, btn('trash', 'Delete data older than the retention period', { class: 'bad', onclick: async (e) => {
               const d = parseInt(st.retentionDays, 10) || 180;
-              if (prompt(`Delete everything older than ${d} days for ALL users? Type DELETE to confirm:`) !== 'DELETE') return;
+              if (await askType(`Delete everything older than ${d} days for ALL users? Type DELETE to confirm:`) !== 'DELETE') return;
               e.currentTarget.disabled = true;
-              try { const r = await api('/purge', { method: 'POST', body: { days: d } }); alert('Deleted: ' + JSON.stringify(r.deleted)); } catch (er) { alert(er.message); }
+              try { const r = await api('/purge', { method: 'POST', body: { days: d } }); notify('Deleted: ' + JSON.stringify(r.deleted)); } catch (er) { notify(er.message); }
               load();
             } }))),
           card('Accounts and deletion', null,
@@ -536,12 +618,20 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
       msg ? h('div', { class: 'err' }, msg) : null, h('button', { class: 'pri' }, 'Sign in'),
       h('button', { type: 'button', class: 'link', onclick: async (e) => {
         const email = f.email.value.trim();
-        if (!email) { f.email.focus(); alert('Type your admin email first, then tap "Forgot password?".'); return; }
+        if (!email) { f.email.focus(); notify('Type your admin email first, then tap "Forgot password?".'); return; }
         e.currentTarget.disabled = true;
-        try { await api('/auth/reset', { method: 'POST', body: { email } }); alert('If that email belongs to an admin, a password reset link has been sent to it. Check your inbox (and spam).'); }
-        catch (er) { alert(er.message === 'too_many_attempts' ? 'Too many requests. Try again later.' : er.message); }
+        try { await api('/auth/reset', { method: 'POST', body: { email } }); notify('If that email belongs to an admin, a password reset link has been sent to it. Check your inbox (and spam).'); }
+        catch (er) { notify(er.message === 'too_many_attempts' ? 'Too many requests. Try again later.' : er.message); }
         e.currentTarget.disabled = false;
       } }, 'Forgot password?'),
+      h('button', { type: 'button', class: 'link', onclick: async (e) => {
+        const email = f.email.value.trim();
+        if (!email) { f.email.focus(); notify('Type your admin email first, then tap this link.'); return; }
+        e.currentTarget.disabled = true;
+        try { await sendSignInLink(email); } catch (er) { if (er.code === 'auth/too-many-requests') { notify('Too many requests. Try again later.'); e.currentTarget.disabled = false; return; } }
+        notify('If that address belongs to the owner, a sign-in link has been sent. Open it in this browser.', 'Check your email');
+        e.currentTarget.disabled = false;
+      } }, 'Locked out? Email me a sign-in link'),
       h('p', { class: 'notice' }, 'Access is limited to authorised administrators. Activity is logged.'));
     return h('div', { class: 'auth' },
       h('div', { class: 'art' }, h('div', { class: 'brand' }, h('div', { class: 'logo' }, ico('shield')), h('span', {}, 'WBrowser Admin')),
@@ -607,6 +697,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
     if (shellEl && shellEl.parentNode === root) shellEl.replaceWith(shell); else root.replaceChildren(shell, tabbarEl);
     shellEl = shell;
     currentLoad = null;
+    endSelect();
     if (!can(route[5])) { main.append(h('p', { class: 'err' }, 'Not permitted.')); return; }
     const [bar, content, load] = uid ? await viewUser(box, decodeURIComponent(uid[1]))
       : site ? await viewSite(box, decodeURIComponent(site[1])) : await route[4](h('div', {}));
@@ -622,6 +713,13 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
 
   async function boot() {
     try { me = await initFirebase(); } catch { me = null; }
+    let linkMsg = '';
+    if (hasEmailLink()) {
+      const em = storedLinkEmail() || await askEmail();
+      if (em) { try { me = await finishEmailLink(em); } catch { me = null; linkMsg = 'That sign-in link is invalid or has expired. Request a new one.'; } }
+      else history.replaceState(null, '', location.pathname + '#/');
+    }
+    if (linkMsg) { render(linkMsg); return; }
     render(configured() ? '' : 'Firebase is not configured yet: paste your web config into firebase-config.js and redeploy.');
   }
   window.addEventListener('hashchange', () => { if (me) render(); });
