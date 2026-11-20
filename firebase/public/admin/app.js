@@ -1,5 +1,5 @@
 // WBrowser Admin App (Firebase). Plain JS, no inline code (strict CSP). All dynamic text goes through textContent.
-import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watchPresence, bustUsers } from './fb.js';
+import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watchPresence, bustUsers, sendSignInLink, hasEmailLink, finishEmailLink, storedLinkEmail } from './fb.js';
 (() => {
   const root = document.getElementById('app');
   let me = null;
@@ -127,7 +127,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
   let gid = 0;
   function areaChart(rows, key, label, cls = '') {
     if (!rows.length) return h('div', { class: 'empty' }, 'No data in this range.');
-    const W = 640, H = 200, L = 40, R = 10, T = 12, B = 26;
+    const W = 640, H = 150, L = 40, R = 10, T = 10, B = 24;
     const max = Math.max(1, ...rows.map((r) => r[key] || 0));
     const nice = Math.ceil(max / 4) * 4 || 4;
     const x = (i) => L + (rows.length === 1 ? (W - L - R) / 2 : (i * (W - L - R)) / (rows.length - 1));
@@ -144,7 +144,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
     let d = `M${pts[0][0]},${pts[0][1]}`;
     for (let i = 1; i < pts.length; i++) { const [x0, y0] = pts[i - 1], [x1, y1] = pts[i], cx = (x0 + x1) / 2; d += ` C${cx},${y0} ${cx},${y1} ${x1},${y1}`; }
     svg.append(s('path', { d: `${d} L${pts[pts.length - 1][0]},${H - B} L${pts[0][0]},${H - B} Z`, fill: `url(#${id})`, class: 'ar' }));
-    svg.append(s('path', { d, class: 'ln', fill: 'none' }));
+    svg.append(s('path', { d, class: 'ln', fill: 'none', pathLength: '1' }));
     rows.forEach((r, i) => {
       svg.append(s('circle', { class: 'hit', cx: pts[i][0], cy: pts[i][1], r: 14 }, s('title', {}, `${r.day}: ${fmt(r[key])}`)),
         s('circle', { class: rows.length < 3 ? 'dotp show' : 'dotp', cx: pts[i][0], cy: pts[i][1], r: 4.5 }));
@@ -154,7 +154,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
   }
 
   function colChart(rows, key, label, xl) {
-    const W = 640, H = 170, L = 34, B = 24, T = 8;
+    const W = 640, H = 130, L = 34, B = 22, T = 8;
     const max = Math.max(1, ...rows.map((r) => r[key] || 0));
     const bw = (W - L) / rows.length;
     const svg = s('svg', { class: 'chart', viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': label });
@@ -184,7 +184,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
     return h('table', {},
       h('thead', {}, h('tr', {}, cols.map((c) => h('th', { class: c.num ? 'num' : '' }, c.label)))),
       h('tbody', {}, rows.length ? rows.map((r) => h('tr', onRow ? { class: 'click', onclick: () => onRow(r) } : {},
-        cols.map((c) => h('td', { class: (c.num ? 'num ' : '') + (c.cls || ''), 'data-label': c.label || '' }, c.cell(r))))) : h('tr', {}, h('td', { colspan: cols.length, class: 'empty' }, 'Nothing to show.'))));
+        cols.map((c) => h('td', { class: (c.num ? 'num ' : '') + (c.main ? 'main ' : '') + (c.cls || ''), 'data-label': c.label || '' }, c.cell(r))))) : h('tr', {}, h('td', { colspan: cols.length, class: 'empty' }, 'Nothing to show.'))));
   }
   const kpi = (v, l, icon, t = '') => h('div', { class: `kpi ${t}` }, h('div', { class: 'badge' }, ico(icon)), h('b', {}, v), h('span', {}, l));
   const pager = (page, total, limit, go) => h('div', { class: 'pager' },
@@ -192,12 +192,92 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
     h('button', { disabled: page <= 1, onclick: () => go(page - 1) }, 'Prev'), h('span', {}, `Page ${page}`),
     h('button', { disabled: page * limit >= total, onclick: () => go(page + 1) }, 'Next'));
   const card = (title, hint, ...body) => h('div', { class: 'card' }, h('h2', {}, title), hint ? h('p', { class: 'hint' }, hint) : h('div', { class: 'hint' }), body);
+  const navRow = (href, icon, title, hint) => h('a', { class: 'listrow', href }, h('div', { class: 'badge' }, ico(icon)), h('div', {}, h('b', {}, title), h('div', { class: 'sub' }, hint)), h('span', { class: 'go' }, ico('chev')));
   const searchBox = (placeholder, on) => h('div', { class: 'search' }, ico('search'), h('input', { placeholder, oninput: (e) => on(e.target.value) }));
+
+
+  // ---------- bottom-sheet dialogs (replace the browser's confirm / alert / prompt) ----------
+  function dialogSheet({ icon, tone = '', title, text, field, actions }) {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (v) => { if (done) return; done = true; ov.classList.add('out'); setTimeout(() => ov.remove(), 190); resolve(v); };
+      const input = field ? h('input', { placeholder: field, autocomplete: 'off', autocapitalize: 'off', oninput: () => sync() }) : null;
+      const btns = actions.map((a) => h('button', { class: a.cls || '', onclick: () => finish(a.value(input)) }, a.label));
+      const sync = () => actions.forEach((a, i) => { if (a.needs) btns[i].disabled = !a.needs(input); });
+      const ov = h('div', { class: 'overlay', onclick: (e) => { if (e.target === ov) finish(actions.find((a) => a.cancel).value(input)); } },
+        h('div', { class: 'sheet dlg' }, h('div', { class: 'dico ' + tone }, ico(icon)), h('h3', {}, title), h('p', {}, text), input, h('div', { class: 'row2' }, btns)));
+      document.body.append(ov); sync(); input?.focus();
+    });
+  }
+  const risky = (t) => /delete|erase|clear|permanently/i.test(t);
+  const ask = (text, title) => dialogSheet({ icon: risky(text) ? 'trash' : 'check', tone: risky(text) ? 'bad' : '', title: title || (risky(text) ? 'Are you sure?' : 'Please confirm'), text,
+    actions: [{ label: 'Cancel', value: () => false, cancel: true }, { label: risky(text) ? 'Delete' : 'Confirm', cls: risky(text) ? 'bad' : 'pri', value: () => true }] });
+  const askType = (text) => dialogSheet({ icon: 'trash', tone: 'bad', title: 'Are you sure?', text, field: 'Type DELETE to confirm',
+    actions: [{ label: 'Cancel', value: () => null, cancel: true }, { label: 'Delete', cls: 'bad', needs: (i) => i.value === 'DELETE', value: () => 'DELETE' }] });
+  const askEmail = () => dialogSheet({ icon: 'user', title: 'Confirm your email', text: 'Type the email address the sign-in link was sent to.', field: 'Your admin email',
+    actions: [{ label: 'Cancel', value: () => null, cancel: true }, { label: 'Continue', cls: 'pri', needs: (i) => i.value.includes('@'), value: (i) => i.value.trim() }] });
+  const notify = (text, title) => {
+    const bad = /fail|error|invalid|expired|too many|not permitted/i.test(String(text));
+    return dialogSheet({ icon: bad ? 'pause' : 'check', tone: bad ? 'bad' : 'ok', title: title || (bad ? 'Something went wrong' : 'Done'), text: String(text), actions: [{ label: 'OK', cls: 'pri', value: () => true, cancel: true }] });
+  };
+
+  // ---------- press and hold: select rows, then delete several at once ----------
+  let sel = null, selBar = null;
+  function endSelect() { sel = null; selBar?.remove(); selBar = null; document.querySelectorAll('.overlay').forEach((o) => o.remove()); document.querySelectorAll('.selecting').forEach((e) => e.classList.remove('selecting')); }
+  function updateBar() {
+    if (!selBar) return;
+    selBar.querySelector('b').textContent = sel.size + ' selected';
+    selBar.querySelector('.del').disabled = sel.size === 0;
+  }
+  function openSheet(title, items) {
+    const close = () => ov.remove();
+    const ov = h('div', { class: 'overlay', onclick: (e) => { if (e.target === ov) close(); } },
+      h('div', { class: 'sheet' }, h('div', { class: 't' }, title),
+        items.map(([icon, label, cls, fn]) => btn(icon, label, { class: cls || '', onclick: () => { close(); fn(); } })),
+        h('button', { onclick: close }, 'Cancel')));
+    document.body.append(ov);
+  }
+  function selectable(box, rows, kind, base, reload) {
+    const trs = [...box.querySelectorAll('tbody tr')];
+    const del = async (ids) => {
+      if (!ids.length || !await ask(`Delete ${ids.length} ${ids.length === 1 ? 'entry' : 'entries'}?`)) return;
+      try { await api(`${base}/${kind}`, { method: 'DELETE', body: { ids } }); endSelect(); reload(); } catch (er) { notify(er.message); }
+    };
+    const startSelect = (firstId) => {
+      sel = new Set([firstId]);
+      box.classList.add('selecting');
+      trs.forEach((tr, i) => tr.classList.toggle('picked', rows[i] && sel.has(rows[i].id)));
+      selBar?.remove();
+      selBar = h('div', { class: 'selbar' }, h('b', {}, ''),
+        h('button', { onclick: () => { sel = sel.size === rows.length ? new Set() : new Set(rows.map((r) => r.id)); trs.forEach((tr, i) => tr.classList.toggle('picked', rows[i] && sel.has(rows[i].id))); updateBar(); } }, 'All'),
+        btn('trash', 'Delete', { class: 'bad del', onclick: () => del([...sel]) }),
+        h('button', { onclick: () => { endSelect(); trs.forEach((tr) => tr.classList.remove('picked')); } }, 'Done'));
+      document.body.append(selBar); updateBar();
+    };
+    trs.forEach((tr, i) => {
+      const r = rows[i]; if (!r) return;
+      tr.classList.add('sel-row');
+      let timer = 0, sx = 0, sy = 0, fired = false;
+      const fire = () => {
+        fired = true; navigator.vibrate?.(15);
+        if (sel) { sel.has(r.id) ? sel.delete(r.id) : sel.add(r.id); tr.classList.toggle('picked', sel.has(r.id)); updateBar(); return; }
+        if (!can('delete_data')) return;
+        openSheet(r.title || r.query || r.url || 'Entry', [['check', 'Select multiple', '', () => startSelect(r.id)], ['trash', 'Delete this one', 'bad', () => del([r.id])]]);
+      };
+      tr.addEventListener('pointerdown', (e) => { fired = false; sx = e.clientX; sy = e.clientY; clearTimeout(timer); timer = setTimeout(fire, 450); });
+      tr.addEventListener('pointermove', (e) => { if (Math.abs(e.clientX - sx) > 8 || Math.abs(e.clientY - sy) > 8) clearTimeout(timer); });
+      ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => tr.addEventListener(ev, () => clearTimeout(timer)));
+      tr.addEventListener('contextmenu', (e) => { e.preventDefault(); clearTimeout(timer); fire(); });
+      tr.addEventListener('click', (e) => {
+        if (fired) { fired = false; e.preventDefault(); e.stopPropagation(); return; }
+        if (sel) { e.preventDefault(); e.stopPropagation(); sel.has(r.id) ? sel.delete(r.id) : sel.add(r.id); tr.classList.toggle('picked', sel.has(r.id)); updateBar(); }
+      }, true);
+    });
+  }
 
   // ---------- views ----------
   async function viewOverview(box) {
     const load = async () => {
-      box.replaceChildren(loading());
       try {
         const d = await api(`/overview?${range()}`);
         box.replaceChildren(
@@ -206,6 +286,8 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
             kpi(fmt(d.totals.visits), 'Page visits', 'globe', 't-cyan'), kpi(fmt(d.totals.domains), 'Websites visited', 'layers', 't-violet'),
             kpi(dur(d.totals.totalMs), 'Total browsing time', 'clock', 't-warn'), kpi(dur(d.sessions.avgMs), 'Avg session duration', 'clock', 't-ok'),
             kpi(fmt(d.sessions.n), 'Sessions', 'list', 't-cyan'), kpi(fmt(d.users.newUsers), 'New users', 'userplus', 't-violet')),
+          h('div', { class: 'card list' }, h('h2', {}, 'Sessions'), h('div', { class: 'hint' }, `${fmt(d.sessions.n)} sessions, ${dur(d.sessions.avgMs)} on average`),
+            navRow('#/sessions', 'clock', 'Session details', 'How often and how long the browser is used')),
           h('div', { class: 'cols' },
             card('Visits per day', 'Pages opened across all users', areaChart(d.daily, 'visits', 'Visits per day')),
             card('Active users per day', 'Distinct people browsing', areaChart(d.daily, 'users', 'Active users per day', 'cy'))),
@@ -226,7 +308,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
       try {
         const d = await api(`/websites?${range()}&q=${encodeURIComponent(q)}&sort=${sort}&limit=200`);
         box.replaceChildren(h('div', { class: 'card' }, table([
-          { label: 'Website', cell: (r) => h('div', { class: 'who' }, h('div', { class: `av sq ${tone(r.domain)}` }, r.domain[0].toUpperCase()), siteLink(r.domain)) },
+          { label: 'Website', main: 1, cell: (r) => h('div', { class: 'who' }, h('div', { class: `av sq ${tone(r.domain)}` }, r.domain[0].toUpperCase()), siteLink(r.domain)) },
           { label: 'Visits', num: 1, cell: (r) => fmt(r.visits) }, { label: 'Users', num: 1, cell: (r) => fmt(r.users) },
           { label: 'Total time', num: 1, cell: (r) => dur(r.totalMs) }, { label: 'Avg / visit', num: 1, cell: (r) => dur(r.avgMs) },
           { label: 'Last visit', cell: (r) => ago(r.lastVisit) }], d.rows, (r) => { location.hash = '#/websites/' + encodeURIComponent(r.domain); })));
@@ -255,7 +337,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
       try {
         const d = await api(`/users?${range()}&q=${encodeURIComponent(q)}&page=${page}&limit=25`);
         box.replaceChildren(h('div', { class: 'card' }, table([
-          { label: 'User', cell: (r) => h('div', { class: 'who' }, avatar(r.name), h('div', {}, h('b', {}, r.name), h('span', { class: 'sub' }, r.email || r.google_name || r.code || r.id))) },
+          { label: 'User', main: 1, cell: (r) => h('div', { class: 'who' }, avatar(r.name), h('div', {}, h('b', {}, r.name), h('span', { class: 'sub' }, r.email || r.google_name || r.code || r.id))) },
           { label: 'User ID', cell: (r) => r.code || r.id },
           { label: 'Last seen', cell: (r) => h('span', {}, h('i', { class: 'dot ' + (online(r) ? 'on' : '') }), online(r) ? 'Online' : ago(r.last_seen)) },
           { label: 'Visits', num: 1, cell: (r) => fmt(r.visits) }, { label: 'Browsing', num: 1, cell: (r) => dur(r.totalMs) }, { label: 'Sessions', num: 1, cell: (r) => dur(r.sessionMs) },
@@ -277,17 +359,17 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
         if (can('manage_users')) {
           actions.append(
             btn('pause', u.status === 'active' ? 'Suspend uploads' : 'Reactivate', { onclick: async () => { await api(`/users/${id}`, { method: 'PATCH', body: { status: u.status === 'active' ? 'suspended' : 'active' } }); loadHead(); } }),
-            btn('trash', 'Erase user', { class: 'bad', onclick: async () => { if (confirm(`Permanently erase ${u.name} and all their data?`)) { await api(`/users/${id}`, { method: 'DELETE' }); location.hash = '#/users'; } } }));
+            btn('trash', 'Erase user', { class: 'bad', onclick: async () => { if (await ask(`Permanently erase ${u.name} and all their data?`)) { await api(`/users/${id}`, { method: 'DELETE' }); location.hash = '#/users'; } } }));
         }
         if (can('delete_data')) {
           const wipe = (what, path, msg) => btn('trash', `Clear ${what}`, { class: 'bad', onclick: async () => {
-            if (!confirm(msg)) return;
-            try { const r = await api(path, { method: 'DELETE' }); alert(`Deleted ${r.deleted} ${what}.`); loadHead(); loadBody(); } catch (er) { alert(er.message); }
+            if (!await ask(msg)) return;
+            try { const r = await api(path, { method: 'DELETE' }); notify(`Deleted ${r.deleted} ${what}.`); loadHead(); loadBody(); } catch (er) { notify(er.message); }
           } });
           actions.append(wipe('history', `/users/${encodeURIComponent(id)}/history`, `Delete ALL browsing history and sessions of ${u.name}?`),
             wipe('searches', `/users/${encodeURIComponent(id)}/searches`, `Delete ALL search queries of ${u.name}?`));
         }
-        if (can('export')) actions.append(btn('download', 'Export CSV', { onclick: async () => { try { await csvDownload(id, range()); } catch (er) { alert(er.message); } } }));
+        if (can('export')) actions.append(btn('download', 'Export CSV', { onclick: async () => { try { await csvDownload(id, range()); } catch (er) { notify(er.message); } } }));
         head.replaceChildren(
           h('div', { class: 'card' }, h('div', { class: 'hero' }, avatar(u.name, 'lg'),
             h('div', { class: 'info' }, h('h2', {}, u.name), h('div', { class: 'sub' }, `${u.code || u.id}${u.email ? ' · ' + u.email : ''}`),
@@ -311,27 +393,23 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
         const base = `/users/${encodeURIComponent(id)}`;
         if (tab === 'history') {
           const d = await api(`${base}/history?${range()}&q=${encodeURIComponent(q)}&page=${page}&limit=50`);
-          body.replaceChildren(h('div', { class: 'card' }, table([
+          const card = h('div', { class: 'card' }, table([
             { label: 'When', cell: (r) => dt(r.visited_at) },
-            { label: 'Page', cls: 'url', cell: (r) => h('div', { class: 'who' }, h('div', { class: `av sq ${tone(r.domain)}` }, r.domain[0].toUpperCase()), h('div', {}, extLink(r.url, r.title || r.domain), h('div', { class: 'sub' }, r.url))) },
-            { label: 'Time spent', num: 1, cell: (r) => dur(r.duration_ms) },
-            ...(can('delete_data') ? [{ label: '', cell: (r) => btn('trash', 'Delete', { class: 'bad', title: 'Delete this entry', onclick: async () => {
-              if (!confirm('Delete this history entry?')) return;
-              try { await api(`${base}/history/${encodeURIComponent(r.id)}`, { method: 'DELETE' }); loadBody(); loadHead(); } catch (er) { alert(er.message); }
-            } }) }] : [])], d.rows), pager(page, d.total, 50, (p) => { page = p; loadBody(); })));
+            { label: 'Page', main: 1, cls: 'url', cell: (r) => h('div', { class: 'who' }, h('div', { class: `av sq ${tone(r.domain)}` }, r.domain[0].toUpperCase()), h('div', {}, extLink(r.url, r.title || r.domain), h('div', { class: 'sub' }, r.url))) },
+            { label: 'Time spent', num: 1, cell: (r) => dur(r.duration_ms) }], d.rows), pager(page, d.total, 50, (p) => { page = p; loadBody(); }));
+          body.replaceChildren(can('delete_data') ? h('p', { class: 'hintline' }, 'Tip: press and hold an entry to select or delete.') : null, card);
+          selectable(card, d.rows, 'history', base, () => { loadBody(); loadHead(); });
         } else if (tab === 'sessions') {
           const d = await api(`${base}/sessions?${range()}&limit=100`);
           body.replaceChildren(h('div', { class: 'card' }, table([{ label: 'Started', cell: (r) => dt(r.started_at) }, { label: 'Ended', cell: (r) => dt(r.ended_at) }, { label: 'Duration', num: 1, cell: (r) => dur(r.duration_ms) }], d.rows)));
         } else {
           const d = await api(`${base}/searches?${range()}&limit=100`);
-          body.replaceChildren(h('div', { class: 'card' }, d.consent ? null : h('p', { class: 'hint' }, 'This user has not enabled search-query sharing.'),
+          const card = h('div', { class: 'card' }, d.consent ? null : h('p', { class: 'hint' }, 'This user has not enabled search-query sharing.'),
             table([{ label: 'When', cell: (r) => dt(r.searched_at) },
-              { label: 'Query', cell: (r) => extLink('https://www.google.com/search?q=' + encodeURIComponent(r.query), r.query) },
-              { label: 'Engine', cell: (r) => r.engine || '' },
-              ...(can('delete_data') ? [{ label: '', cell: (r) => btn('trash', 'Delete', { class: 'bad', title: 'Delete this search', onclick: async () => {
-                if (!confirm('Delete this search query?')) return;
-                try { await api(`${base}/searches/${encodeURIComponent(r.id)}`, { method: 'DELETE' }); loadBody(); } catch (er) { alert(er.message); }
-              } }) }] : [])], d.rows)));
+              { label: 'Query', main: 1, cell: (r) => extLink('https://www.google.com/search?q=' + encodeURIComponent(r.query), r.query) },
+              { label: 'Engine', cell: (r) => r.engine || '' }], d.rows));
+          body.replaceChildren(can('delete_data') ? h('p', { class: 'hintline' }, 'Tip: press and hold an entry to select or delete.') : null, card);
+          selectable(card, d.rows, 'searches', base, () => { loadBody(); });
         }
       } catch (e) { body.replaceChildren(errBox(e)); }
     };
@@ -347,7 +425,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
       try {
         const d = await api('/admins');
         box.replaceChildren(
-          h('div', { class: 'card' }, table([{ label: 'Admin', cell: (r) => h('div', { class: 'who' }, avatar(r.name || r.email), h('div', {}, h('b', {}, r.name), h('span', { class: 'sub' }, r.email))) },
+          h('div', { class: 'card' }, table([{ label: 'Admin', main: 1, cell: (r) => h('div', { class: 'who' }, avatar(r.name || r.email), h('div', {}, h('b', {}, r.name), h('span', { class: 'sub' }, r.email))) },
             { label: 'Role', cell: (r) => h('span', { class: 'pill ' + (r.role === 'superadmin' ? 'ok' : '') }, r.role) }, { label: 'Updated', cell: (r) => dt(r.created_at) },
             { label: 'Protected', cell: () => h('span', { class: 'pill ok' }, ico('lock'), 'Cannot be deleted here') }], d.rows)),
           card('Add or change admins', 'Roles are Firebase sign-in claims, so they are managed from your PC with the Admin SDK, never from a browser:',
@@ -364,10 +442,10 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
         const d = await api('/server-info');
         const row = (k, v) => h('tr', {}, h('th', {}, k), h('td', {}, v));
         const danger = (scope, label) => btn('trash', `Clear ${label}`, { class: 'bad', onclick: async (e) => {
-          const w = prompt(`This permanently deletes ${label} for ALL users. Type DELETE to confirm:`);
+          const w = await askType(`This permanently deletes ${label} for ALL users. Type DELETE to confirm:`);
           if (w !== 'DELETE') return;
           e.currentTarget.disabled = true;
-          try { const r = await api('/data', { method: 'DELETE', body: { scope, confirm: 'DELETE' } }); alert('Deleted: ' + JSON.stringify(r.deleted)); } catch (er) { alert(er.message); }
+          try { const r = await api('/data', { method: 'DELETE', body: { scope, confirm: 'DELETE' } }); notify('Deleted: ' + JSON.stringify(r.deleted)); } catch (er) { notify(er.message); }
           load();
         } });
         box.replaceChildren(
@@ -398,12 +476,18 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
   async function viewAccount(box) {
     const form = h('form', { class: 'card', onsubmit: async (e) => {
       e.preventDefault(); const f = e.target;
-      try { await api('/auth/change-password', { method: 'POST', body: { current: f.current.value, next: f.next.value } }); f.reset(); alert('Password changed.'); }
-      catch (er) { alert('Failed: ' + er.message + ' (new password needs 12+ characters)'); }
+      try { await api('/auth/change-password', { method: 'POST', body: { current: f.current.value, next: f.next.value } }); f.reset(); notify('Password changed.'); }
+      catch (er) { notify('Failed: ' + er.message + ' (new password needs 12+ characters)'); }
     } }, h('h2', {}, 'Change password'), h('p', { class: 'hint' }, `Signed in as ${me.email} (${me.role}).`),
       h('div', { class: 'row' }, h('input', { name: 'current', type: 'password', placeholder: 'Current password', autocomplete: 'current-password', required: true }),
         h('input', { name: 'next', type: 'password', placeholder: 'New password (12+ chars)', autocomplete: 'new-password', required: true }), h('button', { class: 'pri' }, 'Update password')));
-    box.replaceChildren(form);
+    const recovery = !me.owner ? null : h('form', { class: 'card', onsubmit: async (e) => {
+      e.preventDefault(); const f = e.target;
+      try { await api('/auth/set-password', { method: 'POST', body: { next: f.next.value } }); f.reset(); notify('Password set. You can now sign in with it on the phone app too.'); }
+      catch (er) { notify(er.message === 'recent_login' ? 'For safety, sign in again with an emailed link first, then set the password.' : 'Failed: the new password needs 12+ characters.'); }
+    } }, h('h2', {}, 'Owner recovery: set a password'), h('p', { class: 'hint' }, 'After signing in with an emailed link there is no password yet. Set one here (no current password needed) so the phone app can sign in too.'),
+      h('div', { class: 'row' }, h('input', { name: 'next', type: 'password', placeholder: 'New password (12+ chars)', autocomplete: 'new-password', required: true }), h('button', { class: 'pri' }, 'Set password')));
+    box.replaceChildren(form, recovery);
     return [h('div', {}), box, null];
   }
 
@@ -415,16 +499,16 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
     const draw = () => {
       if (!d) return;
       if (tab === 'pages') body.replaceChildren(h('div', { class: 'card' }, h('p', { class: 'hint' }, 'Every different page opened on this website, most visited first.'), table([
-        { label: 'Page', cls: 'url', cell: (r) => h('div', {}, extLink(r.url, r.title || r.url), h('div', { class: 'sub' }, r.url)) },
+        { label: 'Page', main: 1, cls: 'url', cell: (r) => h('div', {}, extLink(r.url, r.title || r.url), h('div', { class: 'sub' }, r.url)) },
         { label: 'Visits', num: 1, cell: (r) => fmt(r.visits) }, { label: 'Users', num: 1, cell: (r) => fmt(r.users) },
         { label: 'Time', num: 1, cell: (r) => dur(r.totalMs) }, { label: 'Last opened', cell: (r) => ago(r.lastVisit) }], d.pages)));
       else if (tab === 'timeline') body.replaceChildren(h('div', { class: 'card' }, h('p', { class: 'hint' }, 'Everything opened on this website, newest first (up to 1,000).'), table([
         { label: 'When', cell: (r) => dt(r.visited_at) },
-        { label: 'Page', cls: 'url', cell: (r) => h('div', {}, extLink(r.url, r.title || r.url), h('div', { class: 'sub' }, r.url)) },
+        { label: 'Page', main: 1, cls: 'url', cell: (r) => h('div', {}, extLink(r.url, r.title || r.url), h('div', { class: 'sub' }, r.url)) },
         { label: 'User', cell: (r) => h('a', { href: '#/users/' + r.uid }, r.user) },
         { label: 'Time spent', num: 1, cell: (r) => dur(r.duration_ms) }], d.timeline)));
       else body.replaceChildren(h('div', { class: 'card' }, table([
-        { label: 'User', cell: (r) => h('div', { class: 'who' }, avatar(r.name), h('a', { href: '#/users/' + r.uid }, r.name)) },
+        { label: 'User', main: 1, cell: (r) => h('div', { class: 'who' }, avatar(r.name), h('a', { href: '#/users/' + r.uid }, r.name)) },
         { label: 'Visits', num: 1, cell: (r) => fmt(r.visits) }, { label: 'Time', num: 1, cell: (r) => dur(r.totalMs) }, { label: 'Last visit', cell: (r) => ago(r.lastVisit) }], d.byUser)));
     };
     const load = async () => {
@@ -448,12 +532,13 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
       prefs.set(key, v); e.currentTarget.parentNode.querySelectorAll('button').forEach((b) => b.classList.remove('on')); e.currentTarget.classList.add('on'); if (onSet) onSet(v);
     } }, l)));
     const setting = (title, hint, control) => h('div', { class: 'setting' }, h('div', {}, h('b', {}, title), h('div', { class: 'sub' }, hint)), control);
-    const link = (href, icon, title, hint) => h('a', { class: 'listrow', href }, h('div', { class: 'badge' }, ico(icon)), h('div', {}, h('b', {}, title), h('div', { class: 'sub' }, hint)), h('span', { class: 'go' }, ico('chev')));
+    const link = navRow;
     box.replaceChildren(
       card('Appearance and behaviour', null,
         setting('Theme', 'Match your device or force light or dark', seg('theme', [['auto', 'Auto'], ['light', 'Light'], ['dark', 'Dark']], applyTheme)),
         setting('Default date range', 'Used when you open the console', seg('range', [['7', '7 days'], ['30', '30 days'], ['90', '90 days']], (v) => { filter.preset = v; })),
         setting('Auto refresh', 'Reload the current page automatically', seg('auto', [['0', 'Off'], ['30', '30 s'], ['60', '60 s']], () => scheduleRefresh()))),
+      can('aggregate') ? h('div', { class: 'card list' }, h('h2', {}, 'Analytics'), h('div', { class: 'hint' }, 'More reports.'), link('#/sessions', 'clock', 'Sessions', 'How often and how long the browser is used')) : null,
       (can('manage_config') || can('manage_admins') || can('audit') || can('server_info'))
         ? h('div', { class: 'card list' }, h('h2', {}, 'Manage'), h('div', { class: 'hint' }, 'Control the phone app and see who has access.'),
             can('manage_config') ? link('#/config', 'gear', 'Firebase settings', 'Remote app settings and data retention') : null,
@@ -463,7 +548,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
         : null,
       h('div', { class: 'card list' }, h('h2', {}, 'Account'), h('div', { class: 'hint' }),
         link('#/account', 'user', 'My account', 'Change your password')),
-      card('Session', null, h('p', {}, h('b', {}, me.name || me.email), ' ', h('span', { class: 'pill' }, me.role)), h('div', { class: 'row' },
+      card('Signed in', null, h('p', {}, h('b', {}, me.name || me.email), ' ', h('span', { class: 'pill' }, me.role)), h('div', { class: 'row' },
         btn('out', 'Sign out', { class: 'bad', onclick: async () => { await api('/auth/logout', { method: 'POST' }); me = null; render(); } }))));
     return [h('div', {}), box, null];
   }
@@ -478,7 +563,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
         const num = (k, min, max) => h('input', { type: 'number', min, max, value: st[k], oninput: (e) => { st[k] = e.target.value; } });
         const row = (title, hint, control) => h('div', { class: 'setting' }, h('div', {}, h('b', {}, title), h('div', { class: 'sub' }, hint)), control);
         const ann = h('input', { type: 'text', maxlength: 200, value: st.announcement, placeholder: 'Shown inside the phone app (optional)', oninput: (e) => { st.announcement = e.target.value; } });
-        const save = btn('check', 'Save settings', { class: 'pri', onclick: async (e) => { e.currentTarget.disabled = true; try { await api('/config', { method: 'PUT', body: st }); alert('Saved. Phones pick this up at their next sync.'); } catch (er) { alert(er.message); } load(); } });
+        const save = btn('check', 'Save settings', { class: 'pri', onclick: async (e) => { e.currentTarget.disabled = true; try { await api('/config', { method: 'PUT', body: st }); notify('Saved. Phones pick this up at their next sync.'); } catch (er) { notify(er.message); } load(); } });
         box.replaceChildren(
           card('Remote app settings', 'Saved in Firebase. Every phone reads these at its next sync, and the security rules enforce the first two switches even if an app ignored them.',
             row('Collect browsing activity', 'Off = every phone stops uploading immediately (kill switch)', onoff(st.trackingEnabled, (v) => { st.trackingEnabled = v; })),
@@ -490,9 +575,9 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
           card('Delete old data', 'Permanently deletes visits, sessions and searches older than the retention period for every user.',
             h('div', { class: 'row' }, btn('trash', 'Delete data older than the retention period', { class: 'bad', onclick: async (e) => {
               const d = parseInt(st.retentionDays, 10) || 180;
-              if (prompt(`Delete everything older than ${d} days for ALL users? Type DELETE to confirm:`) !== 'DELETE') return;
+              if (await askType(`Delete everything older than ${d} days for ALL users? Type DELETE to confirm:`) !== 'DELETE') return;
               e.currentTarget.disabled = true;
-              try { const r = await api('/purge', { method: 'POST', body: { days: d } }); alert('Deleted: ' + JSON.stringify(r.deleted)); } catch (er) { alert(er.message); }
+              try { const r = await api('/purge', { method: 'POST', body: { days: d } }); notify('Deleted: ' + JSON.stringify(r.deleted)); } catch (er) { notify(er.message); }
               load();
             } }))),
           card('Accounts and deletion', null,
@@ -517,8 +602,10 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
     ['#/settings', 'Settings', 'Appearance, refresh and more', 'gear', viewSettings, 'aggregate', 'Account'],
   ];
   // bottom bar on phones: main areas + Settings (which lists the rest)
-  const TABS = [['#/', 'Overview', 'grid'], ['#/websites', 'Websites', 'globe'], ['#/sessions', 'Sessions', 'clock'], ['#/users', 'Users', 'users'], ['#/settings', 'Settings', 'gear']];
+  const TABS = [['#/', 'Overview', 'grid'], ['#/websites', 'Websites', 'globe'], ['#/users', 'Users', 'users'], ['#/settings', 'Settings', 'gear']];
   const SETTINGS_GROUP = ['#/settings', '#/admins', '#/server', '#/audit', '#/account', '#/config'];
+  // which bottom tab is highlighted for a given page (Sessions is reached from Overview)
+  const tabOf = (r) => (r === '#/sessions' ? '#/' : SETTINGS_GROUP.includes(r) ? '#/settings' : r);
 
   function loginView(msg) {
     const f = h('form', { onsubmit: async (e) => {
@@ -531,12 +618,20 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
       msg ? h('div', { class: 'err' }, msg) : null, h('button', { class: 'pri' }, 'Sign in'),
       h('button', { type: 'button', class: 'link', onclick: async (e) => {
         const email = f.email.value.trim();
-        if (!email) { f.email.focus(); alert('Type your admin email first, then tap "Forgot password?".'); return; }
+        if (!email) { f.email.focus(); notify('Type your admin email first, then tap "Forgot password?".'); return; }
         e.currentTarget.disabled = true;
-        try { await api('/auth/reset', { method: 'POST', body: { email } }); alert('If that email belongs to an admin, a password reset link has been sent to it. Check your inbox (and spam).'); }
-        catch (er) { alert(er.message === 'too_many_attempts' ? 'Too many requests. Try again later.' : er.message); }
+        try { await api('/auth/reset', { method: 'POST', body: { email } }); notify('If that email belongs to an admin, a password reset link has been sent to it. Check your inbox (and spam).'); }
+        catch (er) { notify(er.message === 'too_many_attempts' ? 'Too many requests. Try again later.' : er.message); }
         e.currentTarget.disabled = false;
       } }, 'Forgot password?'),
+      h('button', { type: 'button', class: 'link', onclick: async (e) => {
+        const email = f.email.value.trim();
+        if (!email) { f.email.focus(); notify('Type your admin email first, then tap this link.'); return; }
+        e.currentTarget.disabled = true;
+        try { await sendSignInLink(email); } catch (er) { if (er.code === 'auth/too-many-requests') { notify('Too many requests. Try again later.'); e.currentTarget.disabled = false; return; } }
+        notify('If that address belongs to the owner, a sign-in link has been sent. Open it in this browser.', 'Check your email');
+        e.currentTarget.disabled = false;
+      } }, 'Locked out? Email me a sign-in link'),
       h('p', { class: 'notice' }, 'Access is limited to authorised administrators. Activity is logged.'));
     return h('div', { class: 'auth' },
       h('div', { class: 'art' }, h('div', { class: 'brand' }, h('div', { class: 'logo' }, ico('shield')), h('span', {}, 'WBrowser Admin')),
@@ -552,10 +647,33 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
     if (sec > 0) refreshTimer = setInterval(() => { if (me && currentLoad && !document.hidden) { refreshData(); currentLoad(); } }, sec * 1000);
   }
 
+  // ---------- motion helpers (class "fx" on <html> is on only while a page is first drawn) ----------
+  const html = document.documentElement;
+  let fxTimer = null, shellEl = null, tabbarEl = null, tabbarFor = null, lastHash = null;
+  const fxOn = () => { html.classList.add('fx'); clearTimeout(fxTimer); fxTimer = setTimeout(() => html.classList.remove('fx'), 5000); };
+  const fxOffSoon = () => { clearTimeout(fxTimer); fxTimer = setTimeout(() => html.classList.remove('fx'), 1500); };
+
+  function buildTabbar() {
+    const tabs = TABS.filter((t) => can(routes.find((r) => r[0] === t[0])[5]));
+    const el = h('div', { class: 'tabbar' }, h('i', { class: 'ind' }),
+      tabs.map(([href, label, icon]) => h('a', { href }, ico(icon), h('span', {}, label))));
+    el.style.setProperty('--n', tabs.length); el.style.setProperty('--i', -1);
+    el._tabs = tabs.map((t) => t[0]);
+    return el;
+  }
+  function setTab(el, page) {
+    const idx = el._tabs.indexOf(tabOf(page));
+    el.style.setProperty('--i', idx);
+    el.classList.toggle('none', idx < 0);
+    el.querySelectorAll('a').forEach((a, i) => a.classList.toggle('on', i === idx));
+  }
+
   async function render(msg) {
-    if (!me) { stopPresence(); clearInterval(refreshTimer); root.replaceChildren(loginView(typeof msg === 'string' ? msg : '')); return; }
+    if (!me) { stopPresence(); clearInterval(refreshTimer); shellEl = tabbarEl = tabbarFor = lastHash = null; root.replaceChildren(loginView(typeof msg === 'string' ? msg : '')); return; }
     startPresence();
     const hash = location.hash || '#/';
+    const hashChanged = hash !== lastHash; lastHash = hash;
+    if (hashChanged) fxOn();
     const uid = /^#\/users\/(.+)$/.exec(hash);
     const site = /^#\/websites\/(.+)$/.exec(hash);
     const route = uid ? ['#/users', 'User activity', 'Profile, history, sessions and searches', 'users', null, 'user_detail']
@@ -568,63 +686,131 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
       h('div', { class: 'sp' }),
       h('div', { class: 'me' }, avatar(me.name || me.email), h('div', {}, h('b', {}, me.name || me.email), h('span', {}, me.role)),
         h('button', { class: 'out', title: 'Sign out', onclick: async () => { await api('/auth/logout', { method: 'POST' }); me = null; render(); } }, ico('out'))));
-    const tabbar = h('div', { class: 'tabbar' }, TABS.filter((t) => can(routes.find((r) => r[0] === t[0])[5])).map(([href, label, icon]) => {
-      const on = href === route[0] || (href === '#/settings' && SETTINGS_GROUP.includes(route[0]));
-      return h('a', { href, class: on ? 'on' : '' }, ico(icon), h('span', {}, label));
-    }));
+    if (tabbarFor !== me) { tabbarEl = buildTabbar(); tabbarFor = me; shellEl = null; }
+    setTab(tabbarEl, route[0]);
     const box = h('div', {});
-    const refreshBtn = btn('refresh', 'Refresh', { onclick: () => { refreshData(); if (currentLoad) currentLoad(); else render(); } });
+    const refreshBtn = btn('refresh', 'Refresh', { onclick: () => { fxOn(); refreshData(); if (currentLoad) Promise.resolve(currentLoad()).finally(fxOffSoon); else render(); } });
     const top = h('div', { class: 'top' }, h('div', {}, h('h1', {}, route[1]), h('p', { class: 'subtitle' }, route[2])), refreshBtn);
     const main = h('main', {}, top);
-    root.replaceChildren(h('div', { class: 'shell' }, nav, main), tabbar);
+    const shell = h('div', { class: 'shell' }, nav, main);
+    // only swap the shell; the bottom bar stays in the page so its indicator can slide between tabs
+    if (shellEl && shellEl.parentNode === root) shellEl.replaceWith(shell); else root.replaceChildren(shell, tabbarEl);
+    shellEl = shell;
     currentLoad = null;
+    endSelect();
     if (!can(route[5])) { main.append(h('p', { class: 'err' }, 'Not permitted.')); return; }
     const [bar, content, load] = uid ? await viewUser(box, decodeURIComponent(uid[1]))
       : site ? await viewSite(box, decodeURIComponent(site[1])) : await route[4](h('div', {}));
-    if (uid) { top.replaceChildren(h('div', {}, h('a', { href: '#/users' }, '\u2190 All users'), h('h1', {}, 'User activity'), h('p', { class: 'subtitle' }, route[2])), refreshBtn); main.append(bar, box); }
-    else if (site) { top.replaceChildren(h('div', {}, h('a', { href: '#/websites' }, '\u2190 All websites'), h('h1', {}, decodeURIComponent(site[1])), h('p', { class: 'subtitle' }, route[2])), refreshBtn); main.append(bar, box); }
+    const back = (href, text) => h('a', { class: 'backlink', href }, ico('back'), text);
+    if (uid) { top.replaceChildren(h('div', {}, back('#/users', 'All users'), h('h1', {}, 'User activity'), h('p', { class: 'subtitle' }, route[2])), refreshBtn); main.append(bar, box); }
+    else if (site) { top.replaceChildren(h('div', {}, back('#/websites', 'All websites'), h('h1', {}, decodeURIComponent(site[1])), h('p', { class: 'subtitle' }, route[2])), refreshBtn); main.append(bar, box); }
     else main.append(bar, content);
     currentLoad = load || null; scheduleRefresh();
-    if (load) load();
-    window.scrollTo(0, 0);
+    if (!content.firstElementChild && !box.firstElementChild) content.replaceChildren(loading());
+    if (load) Promise.resolve(load()).finally(fxOffSoon); else fxOffSoon();
+    if (hashChanged) window.scrollTo(0, 0);
   }
 
   async function boot() {
     try { me = await initFirebase(); } catch { me = null; }
+    let linkMsg = '';
+    if (hasEmailLink()) {
+      const em = storedLinkEmail() || await askEmail();
+      if (em) { try { me = await finishEmailLink(em); } catch { me = null; linkMsg = 'That sign-in link is invalid or has expired. Request a new one.'; } }
+      else history.replaceState(null, '', location.pathname + '#/');
+    }
+    if (linkMsg) { render(linkMsg); return; }
     render(configured() ? '' : 'Firebase is not configured yet: paste your web config into firebase-config.js and redeploy.');
   }
   window.addEventListener('hashchange', () => { if (me) render(); });
   setupPullToRefresh();
+  setupMotion();
   boot();
 
   // ---------- pull-to-refresh: drag down from the very top of any page ----------
   function setupPullToRefresh() {
     const el = h('div', { class: 'ptr' }, ico('refresh'));
     document.body.appendChild(el);
-    const THRESHOLD = 64;
-    const atTop = () => (document.scrollingElement || document.documentElement).scrollTop <= 2;
-    let startY = 0, active = false, armed = false;
+    const THRESHOLD = 60;
+    const atTop = () => (document.scrollingElement || html).scrollTop <= 2;
+    let startY = 0, startX = 0, active = false, armed = false, busy = false;
+    const reset = () => { el.classList.remove('show', 'go'); el.style.transform = ''; };
     document.addEventListener('touchstart', (e) => {
-      armed = me != null && atTop() && e.touches.length === 1;
+      armed = me != null && !busy && atTop() && e.touches.length === 1;
       active = false;
-      if (armed) startY = e.touches[0].clientY;
+      if (armed) { startY = e.touches[0].clientY; startX = e.touches[0].clientX; }
     }, { passive: true });
     document.addEventListener('touchmove', (e) => {
       if (!armed) return;
-      const dy = e.touches[0].clientY - startY;
-      if (dy <= 0 || !atTop()) { armed = false; active = false; el.classList.remove('show', 'go'); el.style.transform = ''; return; }
+      const dy = e.touches[0].clientY - startY, dx = Math.abs(e.touches[0].clientX - startX);
+      if (dy <= 0 || !atTop() || (!active && dx > dy)) { armed = false; active = false; reset(); return; }
       active = true;
-      const d = Math.min(dy * 0.5, 92);
+      const d = Math.min(dy * 0.55, 96);
       el.classList.add('show');
       el.classList.toggle('go', d >= THRESHOLD);
-      el.style.transform = `translate(-50%,${d}px) rotate(${d * 3}deg)`;
+      el.style.transform = 'translate(-50%,' + d + 'px) rotate(' + (d * 3.2) + 'deg) scale(' + (0.7 + Math.min(d / THRESHOLD, 1) * 0.3) + ')';
     }, { passive: true });
-    const release = () => {
-      if (active && el.classList.contains('go')) { refreshData(); bustUsers(); if (currentLoad) currentLoad(); else render(); }
+    const release = async () => {
+      const fire = active && el.classList.contains('go');
       armed = false; active = false;
-      el.classList.remove('show', 'go'); el.style.transform = '';
+      if (!fire) { reset(); return; }
+      busy = true; fxOn();
+      el.classList.add('spin'); el.style.transform = 'translate(-50%,64px)';
+      refreshData(); bustUsers();
+      const t0 = Date.now();
+      try { if (currentLoad) await currentLoad(); else await render(); } catch { /* shown by the view */ }
+      await new Promise((r) => setTimeout(r, Math.max(0, 650 - (Date.now() - t0))));
+      el.classList.remove('spin'); reset(); busy = false; fxOffSoon();
     };
     document.addEventListener('touchend', release);
-    document.addEventListener('touchcancel', release);
+    document.addEventListener('touchcancel', () => { armed = false; active = false; if (!busy) reset(); });
+  }
+
+  // ---------- tap ripple + reveal on scroll + compact header on scroll ----------
+  function setupMotion() {
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const phone = matchMedia('(max-width:760px)');
+    // ripple on any tap target
+    document.addEventListener('pointerdown', (e) => {
+      if (reduce) return;
+      const t = e.target.closest && e.target.closest('button,.tabbar a,.listrow,nav a.item,tr.click');
+      if (!t || t.disabled || (t.matches('tr.click') && !phone.matches)) return;
+      const r = t.getBoundingClientRect(), size = Math.max(r.width, r.height) * 2;
+      const dot = h('span', { class: 'rip' });
+      dot.style.width = dot.style.height = size + 'px';
+      dot.style.left = (e.clientX - r.left - size / 2) + 'px';
+      dot.style.top = (e.clientY - r.top - size / 2) + 'px';
+      t.append(dot);
+      dot.addEventListener('animationend', () => dot.remove());
+    }, { passive: true });
+    // header gets compact + shadow once the page is scrolled
+    let ticking = false;
+    addEventListener('scroll', () => {
+      if (ticking) return; ticking = true;
+      requestAnimationFrame(() => { html.classList.toggle('scrolled', scrollY > 6); ticking = false; });
+    }, { passive: true });
+    // cards / rows / tiles fade and rise into place (staggered) when they enter the screen
+    if (reduce || !('IntersectionObserver' in window)) return;
+    const io = new IntersectionObserver((entries) => {
+      let n = 0;
+      for (const en of entries) {
+        if (!en.isIntersecting) continue;
+        const el = en.target; io.unobserve(el);
+        el.style.transitionDelay = Math.min(n++, 8) * 45 + 'ms';
+        el.classList.add('in');
+        setTimeout(() => { el.style.transitionDelay = ''; el.classList.remove('rv', 'in'); }, 900 + n * 45);
+      }
+    }, { threshold: 0.06 });
+    const SEL = '.card,.kpi,.listrow,tbody tr,.bar,.skeleton';
+    let queued = false;
+    const scan = () => {
+      queued = false;
+      for (const el of root.querySelectorAll(SEL)) {
+        if (el._seen) continue; el._seen = true;
+        const below = el.getBoundingClientRect().top > innerHeight;
+        if (below || html.classList.contains('fx')) { el.classList.add('rv'); io.observe(el); }
+      }
+    };
+    new MutationObserver(() => { if (!queued) { queued = true; requestAnimationFrame(scan); } }).observe(root, { childList: true, subtree: true });
   }
 })();

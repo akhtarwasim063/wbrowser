@@ -1,6 +1,6 @@
 # WBrowser
 
-Flutter browser with ad/tracker blocking, Brave-style shield toggle, history and Firebase sync.
+Android browser (GeckoView) with ad/tracker blocking, background playback, PiP mini-player, history and Firebase sync, plus an admin app and web dashboard.
 
 ## Repository ownership
 
@@ -26,38 +26,21 @@ Workflow:
 
 Current feature branch: `feature/background-playback-pip` (background playback, PiP mini-player).
 
+## Project layout
+| Folder | What it is | Tech |
+|---|---|---|
+| `native_android/` | The WBrowser app (`dev.wbrowser.nativeapp`) | Kotlin, Gradle, GeckoView, Firebase Auth + Firestore |
+| `admin_android/` | Admin Android app (`dev.wbrowser.admin`), fully native, talks to Firebase directly (the web console in `firebase/public/admin` still works too) | Kotlin, Jetpack Compose, Firebase Auth + Firestore |
+| `firebase/` | Backend: Firestore rules, Hosting, admin web page (`public/admin`), privacy/terms pages, helper scripts, `legal/` source | Firebase, Node.js |
+| `docs/` | Research and compliance notes | Markdown |
+
 ## Run
-    flutter run                      # Android device/emulator
-    flutter build apk --debug
+    cd native_android && gradlew installDebug
+    cd admin_android  && gradlew installDebug
 
-## Activity tracking + Admin App
-The native Android app (`native_android/`) reports browsing activity (automatic background sync with an offline queue)
-to **Firebase** (Auth + Firestore). Admins use the separate Admin App: a web page on Firebase Hosting
-(`firebase/public/admin`) and an Android wrapper (`admin_android/`). Setup is in `firebase/README.md`; legal/compliance
-notes are in `docs/RESEARCH_AND_COMPLIANCE.md`. The older Node/SQLite backend in `tracking_backend/` is kept as an
-alternative. The section below is for the separate Flutter app in `lib/`.
+Android Studio steps (which folder to open, run configuration): `docs/ANDROID_STUDIO_SETUP.md`. Firebase setup is in `firebase/README.md`. Compliance notes are in `docs/RESEARCH_AND_COMPLIANCE.md`.
+The earlier Flutter prototype and the Node/SQLite backend were removed (still in git history before the cleanup commit).
 
-## Firebase history sync (Flutter app only, one-time)
-1. Create a Firebase project; enable **Authentication -> Email/Password** and **Firestore**.
-2. `dart pub global activate flutterfire_cli`, then `flutterfire configure` in this folder.
-   This overwrites `lib/firebase_options.dart`. Without it the app runs with local history only.
-3. Firestore rules (each user can only touch their own history):
-
-       rules_version = '2';
-       service cloud.firestore {
-         match /databases/{db}/documents {
-           match /users/{uid}/history/{doc} {
-             allow read, write: if request.auth != null && request.auth.uid == uid;
-           }
-         }
-       }
-
-Data model: `users/{uid}/history/{id}` = `{url, title, visitedAt, deleted}`.
-Deleting a row sets `deleted: true` so other devices drop it too.
-
-## Layout
-- `lib/blocker/filter_parser.dart`  ABP filter list -> WebView content-blocker rules + cosmetic CSS
-- `lib/blocker/blocker_service.dart` downloads EasyList / EasyPrivacy / uBlock filters, caches, rebuilds
-- `lib/blocker/youtube_script.dart`  YouTube ad script (fragile, will need upkeep)
-- `lib/history/`                    SQLite store + Firestore sync
-- `lib/ui/`                         browser, history, settings pages
+## Accounts, new computers and cleanup
+- Work from any computer, owner-account recovery (emailed sign-in link) and how to remove everything from a work PC: `docs/SETUP_AND_CLEANUP.md`.
+- `mybrowser.server@gmail.com` is the one permanent superadmin. If its sign-in is ever deleted, open the web admin and tap **Locked out? Email me a sign-in link**.

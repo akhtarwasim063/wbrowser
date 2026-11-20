@@ -9,8 +9,7 @@ on admin sign-ins.
     users/{uid}/visits|searches|sessions/{id}
     admins/{uid}, audit/{id}
 
-Roles: **superadmin** (read everything, delete, suspend) and **analyst** (read-only). The old Node/SQLite backend in
-`../tracking_backend` is still in the repo as an alternative; the apps now use Firebase.
+Roles: **superadmin** (read everything, delete, suspend) and **analyst** (read-only). The legal pages (privacy, terms) are built from `legal/` by `npm run build:legal`.
 
 ## One-time setup (about 15 minutes, in your own Google account)
 1. https://console.firebase.google.com > **Add project** (any name; Analytics not needed).
@@ -40,7 +39,7 @@ Roles: **superadmin** (read everything, delete, suspend) and **analyst** (read-o
 7. Build the apps. The browser app needs no flags (it reads `google-services.json`):
 
        cd native_android && gradlew installDebug
-       cd admin_android  && gradlew installDebug -PADMIN_URL=https://<project>.web.app/admin/
+       cd admin_android  && gradlew installDebug
 
 ## Test locally without a Firebase project
     npx firebase emulators:start --only auth,firestore,hosting --project demo-wbrowser    (needs Java)
@@ -74,3 +73,25 @@ Deleting that record never locks anyone out; the console re-creates it on the ne
 Tips: keep a **second superadmin** as a backup (`set-role.js other@example.com superadmin`). The script refuses to demote or
 remove the last remaining superadmin. Anyone who is an Owner of the Firebase project can still delete sign-ins in the console;
 the recovery script is the way back.
+
+## Owner account: the one permanent superadmin, and how to get back in
+`mybrowser.server@gmail.com` is the project owner. It is **always the only superadmin**, whatever the Auth claim or the `admins` record says:
+- `firestore.rules` (`isBoss()`), `public/admin/fb.js` and the Android app all treat that **verified** email as superadmin.
+  A verified email is required, so nobody can register that address as a password account and use it.
+- Any other account with a `superadmin` claim is only an analyst. `scripts/set-role.js` refuses to make anyone else superadmin,
+  and refuses to demote or remove the owner.
+- Deleting the owner's Auth user or `admins/{uid}` cannot lock the owner out, because access comes from the email, not from the record.
+
+**If the account is deleted or you are locked out (no PC needed):**
+1. Open `https://<project>.web.app/admin/`, type the owner email, tap **Locked out? Email me a sign-in link**.
+2. Open the link in the same browser. This re-creates the sign-in (verified) and you are superadmin again, with all data intact.
+3. Optional: *My account > Owner recovery* lets you set a password so the Android app can sign in with email + password too.
+   (The "Forgot password" email only works while the Auth user exists, so after a deletion use the sign-in link first.)
+
+**One-time setup:** Firebase Console > Authentication > Sign-in method > Email/Password > turn **on** "Email link (passwordless sign-in)".
+Firebase's free plan has email *links* (no numeric OTP codes; those need Cloud Functions on the paid Blaze plan).
+
+**From the PC (needs the service-account key):** `node scripts/restore-owner.js` re-creates the owner sign-in, claim and record.
+
+If you ever change the owner address, update it in four places: `firestore.rules`, `public/admin/fb.js`,
+`scripts/set-role.js` / `scripts/restore-owner.js`, and `AdminRepo.kt` (`OWNER`).

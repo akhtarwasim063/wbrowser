@@ -14,7 +14,10 @@ if (file("google-services.json").exists()) {
 
 android {
     namespace = "dev.wbrowser.nativeapp"
-    compileSdk = 37
+    // GeckoView 160 needs API 37.2+ (minor SDK version)
+    compileSdk {
+        version = release(37) { minorApiLevel = 2 }
+    }
     defaultConfig {
         applicationId = "dev.wbrowser.nativeapp"
         minSdk = 26
