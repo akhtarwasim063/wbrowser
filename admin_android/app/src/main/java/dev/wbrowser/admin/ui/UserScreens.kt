@@ -2,6 +2,14 @@ package dev.wbrowser.admin.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -52,7 +60,7 @@ fun UsersScreen(vm: AdminViewModel) {
     DataScreen(
         title = "Users", subtitle = "Everyone who installed the app", keys = listOf(range), fetch = { vm.repo.usersList(range) },
         header = {
-            rangeBar(range, vm::selectRange)
+            rangeBar(vm)
             item("search") { SearchField(q, { q = it; page = 1 }, "Search name, ID or email…") }
         },
     ) { all, _ ->
@@ -96,7 +104,10 @@ private sealed interface UserAction {
     data object ClearSearches : UserAction
     data class DeleteVisit(val id: String) : UserAction
     data class DeleteSearch(val id: String) : UserAction
+    data class DeleteMany(val ids: List<String>, val searches: Boolean) : UserAction
 }
+
+private fun toggled(set: Set<String>, id: String) = if (id in set) set - id else set + id
 
 @Composable
 fun UserDetailScreen(vm: AdminViewModel, me: Me, uid: String) {
@@ -119,10 +130,26 @@ fun UserDetailScreen(vm: AdminViewModel, me: Me, uid: String) {
         pendingCsv = null
     }
     var suspended by remember { mutableStateOf(false) }
+    var selecting by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf(emptySet<String>()) }
+    var sheet by remember { mutableStateOf<Pair<String, String>?>(null) }
+    val visible = remember { object { var ids: List<String> = emptyList() } }
+    BackHandler(enabled = selecting) { selecting = false; selected = emptySet() }
 
     DataScreen(
         title = "User activity", subtitle = "Profile, history, sessions and searches", keys = listOf(range, uid, tick),
-        fetch = { vm.repo.userDetail(uid, range) }, onBack = vm::pop, header = { rangeBar(range, vm::selectRange) },
+        fetch = { vm.repo.userDetail(uid, range) }, onBack = vm::pop, header = { rangeBar(vm) },
+        overlay = {
+            AnimatedVisibility(selecting, Modifier.align(Alignment.BottomCenter), enter = fadeIn(tween(180)) + slideInVertically { it }, exit = fadeOut(tween(120)) + slideOutVertically { it }) {
+                SelectionBar(
+                    selected.size, visible.ids.size, me.can("delete_data"),
+                    onAll = { selected = if (selected.size == visible.ids.size) emptySet() else visible.ids.toSet() },
+                    onDelete = { action = UserAction.DeleteMany(selected.toList(), tab == 2) },
+                    onCancel = { selecting = false; selected = emptySet() },
+                    modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 78.dp),
+                )
+            }
+        },
     ) { d, _ ->
         val u = d.user
         suspended = u.status != "active"
@@ -176,29 +203,39 @@ fun UserDetailScreen(vm: AdminViewModel, me: Me, uid: String) {
         item("chart") { Reveal { AdminCard { Column { CardTitle("Visits per day"); AreaChart(d.daily.map { it.day }, d.daily.map { it.visits }, p.pri) } } } }
         item("sites") { Reveal { AdminCard { Column { CardTitle("Top sites", "By time spent"); SiteBars(d.topSites) } } } }
 
-        item("tabs") { Segmented(listOf(0, 1, 2), tab, { listOf("History", "Sessions", "Searches")[it] }, { tab = it; page = 1 }) }
+        item("tabs") { Segmented(listOf(0, 1, 2), tab, { listOf("History", "Sessions", "Searches")[it] }, { tab = it; page = 1; selecting = false; selected = emptySet() }) }
+        if (me.can("delete_data") && tab != 1) item("hint") { Text("Tip: press and hold an entry to select or delete.", color = p.mut, fontSize = 11.sp, modifier = Modifier.padding(start = 4.dp)) }
         when (tab) {
             0 -> {
                 item("hq") { SearchField(q, { q = it; page = 1 }, "Filter history by URL or title…") }
                 val rows = d.visits.filter { q.isEmpty() || it.url.contains(q, true) || it.title.contains(q, true) }
+                visible.ids = rows.map { it.id }
                 if (rows.isEmpty()) item("h0") { Empty("Nothing to show.") }
                 itemsIndexed(rows.drop((page - 1) * 50).take(50), key = { _, v -> "v${v.id}" }) { i, v ->
-                    Reveal(i) { AdminCard { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Avatar(v.domain, 28.dp, square = true, text = v.domain.take(1).uppercase().ifEmpty { "?" })
-                            Spacer(Modifier.width(10.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(v.title.ifEmpty { v.domain }, color = p.pri, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable { open(v.url) })
-                                Text(v.url, color = p.mut, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Reveal(i) {
+                        SelectableCard(
+                            selected = v.id in selected, selecting = selecting,
+                            onClick = { if (selecting) selected = toggled(selected, v.id) else open(v.url) },
+                            onLongClick = { if (selecting) selected = toggled(selected, v.id) else if (me.can("delete_data")) sheet = v.id to v.title.ifEmpty { v.domain } },
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Avatar(v.domain, 28.dp, square = true, text = v.domain.take(1).uppercase().ifEmpty { "?" })
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(v.title.ifEmpty { v.domain }, color = p.pri, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                        Text(v.url, color = p.mut, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                }
+                                StatGrid(listOf("When" to dt(v.visitedAt), "Time spent" to dur(v.durationMs)), columns = 2)
                             }
                         }
-                        StatGrid(listOf("When" to dt(v.visitedAt), "Time spent" to dur(v.durationMs)), columns = 2)
-                        if (me.can("delete_data")) GlassButton("Delete", "trash", danger = true) { action = UserAction.DeleteVisit(v.id) }
-                    } } }
+                    }
                 }
                 item("hp") { Pager(page, rows.size, 50) { page = it } }
             }
             1 -> {
+                visible.ids = emptyList()
                 if (d.sessions.isEmpty()) item("s0") { Empty("Nothing to show.") }
                 itemsIndexed(d.sessions.take(100), key = { _, s -> "s${s.id}" }) { i, s ->
                     Reveal(i) { AdminCard { StatGrid(listOf("Started" to dt(s.startedAt), "Ended" to dt(s.endedAt), "Duration" to dur(s.durationMs)), columns = 3) } }
@@ -206,13 +243,22 @@ fun UserDetailScreen(vm: AdminViewModel, me: Me, uid: String) {
             }
             else -> {
                 if (!u.searchConsent) item("sc") { Reveal { AdminCard { Text("This user has not enabled search-query sharing.", color = p.mut, fontSize = 13.sp) } } }
-                if (d.searches.isEmpty()) item("q0") { Empty("Nothing to show.") }
-                itemsIndexed(d.searches.take(100), key = { _, s -> "q${s.id}" }) { i, s ->
-                    Reveal(i) { AdminCard { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(s.query, color = p.pri, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.clickable { open("https://www.google.com/search?q=" + android.net.Uri.encode(s.query)) })
-                        StatGrid(listOf("When" to dt(s.at), "Engine" to s.engine.ifEmpty { "—" }), columns = 2)
-                        if (me.can("delete_data")) GlassButton("Delete", "trash", danger = true) { action = UserAction.DeleteSearch(s.id) }
-                    } } }
+                val rows = d.searches.take(100)
+                visible.ids = rows.map { it.id }
+                if (rows.isEmpty()) item("q0") { Empty("Nothing to show.") }
+                itemsIndexed(rows, key = { _, s -> "q${s.id}" }) { i, s ->
+                    Reveal(i) {
+                        SelectableCard(
+                            selected = s.id in selected, selecting = selecting,
+                            onClick = { if (selecting) selected = toggled(selected, s.id) else open("https://www.google.com/search?q=" + android.net.Uri.encode(s.query)) },
+                            onLongClick = { if (selecting) selected = toggled(selected, s.id) else if (me.can("delete_data")) sheet = s.id to s.query },
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(s.query, color = p.pri, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                StatGrid(listOf("When" to dt(s.at), "Engine" to s.engine.ifEmpty { "—" }), columns = 2)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -227,6 +273,7 @@ fun UserDetailScreen(vm: AdminViewModel, me: Me, uid: String) {
             UserAction.ClearSearches -> Triple("Clear searches?", "Delete ALL search queries of this user.", "Delete")
             is UserAction.DeleteVisit -> Triple("Delete this entry?", "Delete this history entry.", "Delete")
             is UserAction.DeleteSearch -> Triple("Delete this search?", "Delete this search query.", "Delete")
+            is UserAction.DeleteMany -> Triple("Delete ${a.ids.size} entries?", "The selected entries are deleted permanently.", "Delete")
         }
         ConfirmDialog(title, text, label, danger = a != UserAction.Suspend, onDismiss = { action = null }, onConfirm = {
             scope.launch {
@@ -238,11 +285,16 @@ fun UserDetailScreen(vm: AdminViewModel, me: Me, uid: String) {
                         UserAction.ClearSearches -> message = "Done" to "Deleted ${vm.repo.clearSearches(uid)} searches."
                         is UserAction.DeleteVisit -> vm.repo.deleteVisit(uid, a.id)
                         is UserAction.DeleteSearch -> vm.repo.deleteSearch(uid, a.id)
+                        is UserAction.DeleteMany -> { if (a.searches) vm.repo.deleteSearches(uid, a.ids) else vm.repo.deleteVisits(uid, a.ids); selecting = false; selected = emptySet() }
                     }
                     tick++
                 } catch (e: Exception) { message = "Failed" to vm.friendly(e) }
             }
         })
+    }
+    sheet?.let { (id, title) ->
+        RowActionSheet(title, me.can("delete_data"), onSelect = { selecting = true; selected = setOf(id) },
+            onDelete = { action = if (tab == 2) UserAction.DeleteSearch(id) else UserAction.DeleteVisit(id) }, onDismiss = { sheet = null })
     }
     message?.let { (t, m) -> MessageDialog(t, m) { message = null } }
 }

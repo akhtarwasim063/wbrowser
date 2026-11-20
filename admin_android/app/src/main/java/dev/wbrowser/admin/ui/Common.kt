@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -56,7 +57,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.wbrowser.admin.data.Load
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+
+/** Seconds between automatic reloads, set in Settings (0 = off). */
+val LocalAutoRefresh = androidx.compose.runtime.compositionLocalOf { 0 }
 
 /**
  * Compact glass app bar, pull-to-refresh and a staggered list: the frame shared by every screen.
@@ -67,7 +75,7 @@ import kotlinx.coroutines.CancellationException
 @Composable
 fun ScreenScaffold(
     title: String, subtitle: String, refreshing: Boolean, onRefresh: (() -> Unit)?, busy: Boolean = false,
-    onBack: (() -> Unit)? = null, content: LazyListScope.() -> Unit,
+    onBack: (() -> Unit)? = null, overlay: @Composable BoxScope.() -> Unit = {}, content: LazyListScope.() -> Unit,
 ) {
     val p = palette()
     val scroll = TopAppBarDefaults.pinnedScrollBehavior()
@@ -108,6 +116,7 @@ fun ScreenScaffold(
             AnimatedVisibility(busy && !refreshing, Modifier.align(Alignment.TopCenter), enter = fadeIn(), exit = fadeOut()) {
                 LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp), color = p.pri, trackColor = Color.Transparent)
             }
+            overlay()
         }
     }
 }
@@ -119,7 +128,7 @@ fun ScreenScaffold(
 @Composable
 fun <T> DataScreen(
     title: String, subtitle: String, keys: List<Any?>, fetch: suspend () -> T, onBack: (() -> Unit)? = null,
-    header: (LazyListScope.() -> Unit)? = null, content: LazyListScope.(T, () -> Unit) -> Unit,
+    header: (LazyListScope.() -> Unit)? = null, overlay: @Composable BoxScope.() -> Unit = {}, content: LazyListScope.(T, () -> Unit) -> Unit,
 ) {
     var tick by remember { mutableIntStateOf(0) }
     var state by remember { mutableStateOf<Load<T>>(Load.Loading) }
@@ -132,8 +141,14 @@ fun <T> DataScreen(
         catch (e: Exception) { if (state !is Load.Ready) state = Load.Failed(e.message ?: "Something went wrong") }
         busy = false; pulling = false
     }
+    // optional timer from Settings: reloads quietly (thin progress line only) while the app is on screen
+    val autoSec = LocalAutoRefresh.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(autoSec) {
+        if (autoSec > 0) lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { while (true) { delay(autoSec * 1000L); tick++ } }
+    }
     val reload: () -> Unit = { tick++ }
-    ScreenScaffold(title, subtitle, refreshing = pulling, onRefresh = { pulling = true; tick++; Unit }, busy = busy, onBack = onBack) {
+    ScreenScaffold(title, subtitle, refreshing = pulling, onRefresh = { pulling = true; tick++; Unit }, busy = busy, onBack = onBack, overlay = overlay) {
         header?.invoke(this)
         when (val s = state) {
             is Load.Loading -> items(3) { Box(Modifier.fillMaxWidth().height(86.dp).shimmer()) }

@@ -12,7 +12,22 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DateRangePicker
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDateRangePickerState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import dev.wbrowser.admin.data.Period
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -29,19 +44,61 @@ import dev.wbrowser.admin.data.Presence
 import dev.wbrowser.admin.data.UserRow
 
 /** The date filter shared by every analytics screen. */
-fun LazyListScope.rangeBar(range: DateRange, onRange: (DateRange) -> Unit) {
-    item("range") { Reveal(0) { Segmented(DateRange.entries, range, { it.label }, onRange) } }
+fun LazyListScope.rangeBar(vm: AdminViewModel) {
+    item("range") { Reveal(0) { RangeBarContent(vm) } }
+}
+
+private val SHORT = DateTimeFormatter.ofPattern("d MMM")
+
+private fun customLabel(p: Period): String {
+    val z = ZoneId.systemDefault()
+    return "${Instant.ofEpochMilli(p.from).atZone(z).format(SHORT)} – ${Instant.ofEpochMilli(p.to).atZone(z).format(SHORT)}"
+}
+
+/** Today / 7 / 30 / 90 days / Custom. Custom opens a date-range picker. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RangeBarContent(vm: AdminViewModel) {
+    val period by vm.range.collectAsState()
+    var picking by remember { mutableStateOf(false) }
+    Segmented(
+        DateRange.entries, period.preset,
+        { if (it == DateRange.Custom && period.preset == DateRange.Custom) customLabel(period) else it.label },
+        { if (it == DateRange.Custom) picking = true else vm.selectRange(Period(it)) },
+    )
+    if (picking) {
+        val z = ZoneId.systemDefault()
+        fun utcDay(ms: Long) = Instant.ofEpochMilli(ms).atZone(z).toLocalDate().atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+        val state = rememberDateRangePickerState(
+            initialSelectedStartDateMillis = if (period.preset == DateRange.Custom) utcDay(period.from) else null,
+            initialSelectedEndDateMillis = if (period.preset == DateRange.Custom) utcDay(period.to) else null,
+        )
+        DatePickerDialog(
+            onDismissRequest = { picking = false },
+            confirmButton = {
+                TextButton(enabled = state.selectedStartDateMillis != null, onClick = {
+                    val s = state.selectedStartDateMillis!!
+                    val e = state.selectedEndDateMillis ?: s
+                    val from = Instant.ofEpochMilli(s).atZone(ZoneOffset.UTC).toLocalDate().atStartOfDay(z).toInstant().toEpochMilli()
+                    val to = Instant.ofEpochMilli(e).atZone(ZoneOffset.UTC).toLocalDate().plusDays(1).atStartOfDay(z).toInstant().toEpochMilli() - 1
+                    vm.selectRange(Period(DateRange.Custom, from, to)); picking = false
+                }) { Text("Apply") }
+            },
+            dismissButton = { TextButton(onClick = { picking = false }) { Text("Cancel") } },
+        ) { DateRangePicker(state, modifier = Modifier.height(500.dp), title = { Text("Select dates", modifier = Modifier.padding(start = 24.dp, top = 16.dp)) }) }
+    }
 }
 
 private data class Kpi(val icon: String, val tone: Tone, val value: Long, val format: (Long) -> String, val label: String)
 
 private fun fmtL(n: Long) = fmt(n)
 
-fun rangeLabel(r: DateRange) = when (r) {
+fun rangeLabel(p: Period) = when (p.preset) {
     DateRange.Today -> "today"
     DateRange.D7 -> "last 7 days"
     DateRange.D30 -> "last 30 days"
     DateRange.D90 -> "last 90 days"
+    DateRange.Custom -> "selected period"
 }
 
 @Composable
@@ -50,7 +107,7 @@ fun OverviewScreen(vm: AdminViewModel) {
     val presence by vm.presence.collectAsState()
     DataScreen(
         title = "Overview", subtitle = "Browsing activity across all users", keys = listOf(range), fetch = { vm.repo.overview(range) },
-        header = { rangeBar(range, vm::selectRange) },
+        header = { rangeBar(vm) },
     ) { d, _ ->
         val kpis = listOf(
             Kpi("users", Tone.Pri, d.totalUsers.toLong(), ::fmtL, "Registered users"),

@@ -146,19 +146,21 @@ class AdminRepo {
         return SessionStat(durations.size, total, if (durations.isEmpty()) 0 else total / durations.size)
     }
 
-    private fun rangeBounds(r: DateRange): Pair<Long, Long> {
+    private fun rangeBounds(p: Period): Pair<Long, Long> {
+        if (p.preset == DateRange.Custom) return p.from to p.to
         val to = System.currentTimeMillis()
-        val from = when (r) {
+        val from = when (p.preset) {
             DateRange.Today -> Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }.timeInMillis
             DateRange.D7 -> to - 7 * 86400000L
             DateRange.D30 -> to - 30 * 86400000L
             DateRange.D90 -> to - 90 * 86400000L
+            DateRange.Custom -> p.from
         }
         return from to to
     }
 
     // ---------- aggregates ----------
-    suspend fun overview(r: DateRange): Overview {
+    suspend fun overview(r: Period): Overview {
         val (from, to) = rangeBounds(r)
         val tz = tzMin(to)
         val us = users(force = true)
@@ -178,12 +180,12 @@ class AdminRepo {
         )
     }
 
-    suspend fun websites(r: DateRange): List<SiteStat> {
+    suspend fun websites(r: Period): List<SiteStat> {
         val (from, to) = rangeBounds(r)
         return domainMap(allVisits(from, to, users(force = true))).sortedByDescending { it.visits }.take(200)
     }
 
-    suspend fun websiteDetail(domain: String, r: DateRange): SiteDetail {
+    suspend fun websiteDetail(domain: String, r: Period): SiteDetail {
         val (from, to) = rangeBounds(r)
         val us = users(force = true)
         val names = us.associate { it.uid to it.name }
@@ -203,7 +205,7 @@ class AdminRepo {
         )
     }
 
-    suspend fun sessions(r: DateRange): List<SessionDay> {
+    suspend fun sessions(r: Period): List<SessionDay> {
         val (from, to) = rangeBounds(r)
         val tz = tzMin(to)
         return allSessions(from, to, users(force = true)).groupBy { day(it.startedAt, tz) }.map { (k, ss) ->
@@ -213,7 +215,7 @@ class AdminRepo {
     }
 
     // ---------- users ----------
-    suspend fun usersList(r: DateRange): List<UserSummary> {
+    suspend fun usersList(r: Period): List<UserSummary> {
         val (from, to) = rangeBounds(r)
         val docs = db.collection("users").get().await().documents
         val rows = docs.map(::userRow)
@@ -230,7 +232,7 @@ class AdminRepo {
         }.sortedByDescending { it.user.lastSeen }
     }
 
-    suspend fun userDetail(uid: String, r: DateRange): UserDetail {
+    suspend fun userDetail(uid: String, r: Period): UserDetail {
         val (from, to) = rangeBounds(r)
         val tz = tzMin(to)
         val snap = db.collection("users").document(uid).get().await()
@@ -282,6 +284,14 @@ class AdminRepo {
     suspend fun clearHistory(uid: String): Int { val n = wipeSub(uid, "visits"); wipeSub(uid, "sessions"); audit("clear_user_history", uid, "$n visits"); return n }
     suspend fun clearSearches(uid: String): Int { val n = wipeSub(uid, "searches"); audit("clear_user_searches", uid, "$n searches"); return n }
     suspend fun deleteVisit(uid: String, id: String) { db.collection("users").document(uid).collection("visits").document(id).delete().await(); audit("delete_visit", uid, id) }
+    /** Deletes many entries in batches of 400 (multi-select delete). */
+    private suspend fun deleteMany(uid: String, col: String, ids: List<String>) {
+        ids.chunked(400).forEach { chunk ->
+            val b = db.batch(); chunk.forEach { b.delete(db.collection("users").document(uid).collection(col).document(it)) }; b.commit().await()
+        }
+    }
+    suspend fun deleteVisits(uid: String, ids: List<String>) { deleteMany(uid, "visits", ids); audit("delete_visits", uid, "${ids.size} entries") }
+    suspend fun deleteSearches(uid: String, ids: List<String>) { deleteMany(uid, "searches", ids); audit("delete_searches", uid, "${ids.size} entries") }
     suspend fun deleteSearch(uid: String, id: String) { db.collection("users").document(uid).collection("searches").document(id).delete().await(); audit("delete_search", uid, id) }
 
     private fun csvCell(v: Any?): String {
@@ -290,7 +300,7 @@ class AdminRepo {
         return if (s.any { it in "\",\n\r" }) "\"" + s.replace("\"", "\"\"") + "\"" else s
     }
 
-    suspend fun exportCsv(uid: String, r: DateRange): String {
+    suspend fun exportCsv(uid: String, r: Period): String {
         val (from, to) = rangeBounds(r)
         val lines = mutableListOf("visited_at_iso,url,domain,title,duration_seconds")
         var last: DocumentSnapshot? = null

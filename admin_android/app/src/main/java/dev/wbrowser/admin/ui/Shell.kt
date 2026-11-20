@@ -68,6 +68,7 @@ fun MainShell(vm: AdminViewModel, me: Me) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val stack by vm.stack.collectAsState()
     val top = stack.lastOrNull()
+    val auto by vm.autoRefresh.collectAsState()
     BackHandler(enabled = top != null) { vm.pop() }
     BackHandler(enabled = top == null && tab != 0) { tab = 0 }
 
@@ -79,7 +80,7 @@ fun MainShell(vm: AdminViewModel, me: Me) {
         Route.Sessions -> 0
         else -> 3
     }
-    Box(Modifier.fillMaxSize()) {
+    androidx.compose.runtime.CompositionLocalProvider(LocalAutoRefresh provides auto) { Box(Modifier.fillMaxSize()) {
         AnimatedContent(
             targetState = Screen(top, tab, stack.size),
             contentKey = { it.route ?: it.tab },
@@ -102,7 +103,7 @@ fun MainShell(vm: AdminViewModel, me: Me) {
             }
         }
         FloatingTabBar(lit, { vm.popToRoot(); tab = it }, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(horizontal = 18.dp, vertical = 10.dp))
-    }
+    } }
 }
 
 @Composable
@@ -155,6 +156,7 @@ private fun FloatingTabBar(selected: Int, onSelect: (Int) -> Unit, modifier: Mod
 private fun SettingsScreen(vm: AdminViewModel, me: Me) {
     val mode by vm.themeMode.collectAsState()
     val defRange by vm.defaultRange.collectAsState()
+    val auto by vm.autoRefresh.collectAsState()
     var askOut by remember { mutableStateOf(false) }
     val p = palette()
     ScreenScaffold("Settings", "Appearance, access and account", refreshing = false, onRefresh = null) {
@@ -182,6 +184,9 @@ private fun SettingsScreen(vm: AdminViewModel, me: Me) {
                         SettingRow("Theme", "Match your device, or force light or dark") { Segmented(ThemeMode.entries, mode, { it.label }, vm::setTheme) }
                         SettingRow("Default date range", "Used when you open the console") {
                             Segmented(listOf(DateRange.D7, DateRange.D30, DateRange.D90), defRange, { it.label }, vm::setDefaultRange)
+                        }
+                        SettingRow("Auto refresh", "Reload the open screen automatically") {
+                            Segmented(listOf(0, 30, 60), auto, { if (it == 0) "Off" else "${it} s" }, vm::setAutoRefresh)
                         }
                     }
                 }

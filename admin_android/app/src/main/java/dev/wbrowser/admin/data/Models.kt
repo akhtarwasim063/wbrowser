@@ -62,7 +62,10 @@ data class AppConfig(
     val announcement: String, val updatedAt: Long, val updatedBy: String,
 )
 
-enum class DateRange(val label: String) { Today("Today"), D7("7 days"), D30("30 days"), D90("90 days") }
+enum class DateRange(val label: String) { Today("Today"), D7("7 days"), D30("30 days"), D90("90 days"), Custom("Custom") }
+
+/** A preset, or (for Custom) an explicit [from, to] in epoch millis. */
+data class Period(val preset: DateRange = DateRange.D7, val from: Long = 0L, val to: Long = 0L)
 
 sealed interface Load<out T> {
     data object Loading : Load<Nothing>

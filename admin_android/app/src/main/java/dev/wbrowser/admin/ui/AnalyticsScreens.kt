@@ -53,7 +53,7 @@ fun WebsitesScreen(vm: AdminViewModel) {
     DataScreen(
         title = "Websites", subtitle = "Tap a website to see every page opened on it", keys = listOf(range), fetch = { vm.repo.websites(range) },
         header = {
-            rangeBar(range, vm::selectRange)
+            rangeBar(vm)
             item("search") { SearchField(q, { q = it }, "Filter websites…") }
             item("sort") { Segmented(listOf(0, 1), sort, { if (it == 0) "Most visits" else "Most time" }, { sort = it }) }
         },
@@ -81,15 +81,16 @@ private fun SiteRow(s: SiteStat) {
 // ---------- one website ----------
 @Composable
 fun WebsiteDetailScreen(vm: AdminViewModel, domain: String) {
+    val p = palette()
     val range by vm.range.collectAsState()
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val open = rememberOpenLink()
     DataScreen(
+
         title = domain, subtitle = "Every page opened on this website", keys = listOf(range, domain), fetch = { vm.repo.websiteDetail(domain, range) },
-        onBack = vm::pop, header = { rangeBar(range, vm::selectRange) },
+        onBack = vm::pop, header = { rangeBar(vm) },
     ) { d, _ ->
-        val p = palette()
-        item("he ro") {
+        item("hero") {
             Reveal {
                 HeroCard({ Avatar(domain, 52.dp, square = true, text = domain.take(1).uppercase()) }, domain, "Opened ${fmt(d.visits)} times in the ${rangeLabel(range)}") {
                     GlassButton("Open $domain", "globe") { open("https://$domain") }
@@ -146,12 +147,12 @@ fun WebsiteDetailScreen(vm: AdminViewModel, domain: String) {
 // ---------- Sessions ----------
 @Composable
 fun SessionsScreen(vm: AdminViewModel) {
+    val p = palette()
     val range by vm.range.collectAsState()
     DataScreen(
         title = "Sessions", subtitle = "How often and how long the browser is used", keys = listOf(range), fetch = { vm.repo.sessions(range) },
-        onBack = vm::pop, header = { rangeBar(range, vm::selectRange) },
+        onBack = vm::pop, header = { rangeBar(vm) },
     ) { days, _ ->
-        val p = palette()
         item("chart") { Reveal { AdminCard { Column { CardTitle("Sessions per day", "Each time someone opens the browser"); AreaChart(days.map { it.day }, days.map { it.sessions }, p.pri) } } } }
         if (days.isEmpty()) item("none") { Empty("Nothing to show.") }
         itemsIndexed(days.reversed(), key = { _, d -> d.day }) { i, d ->

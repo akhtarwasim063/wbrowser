@@ -9,6 +9,7 @@ import com.google.firebase.auth.FirebaseAuthException
 import dev.wbrowser.admin.data.AdminRepo
 import dev.wbrowser.admin.data.DateRange
 import dev.wbrowser.admin.data.Me
+import dev.wbrowser.admin.data.Period
 import dev.wbrowser.admin.data.Presence
 import dev.wbrowser.admin.ui.ThemeMode
 import kotlinx.coroutines.Job
@@ -43,14 +44,19 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
     val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
     fun setTheme(m: ThemeMode) { _themeMode.value = m; prefs.edit().putString("theme", m.name).apply() }
 
-    private val _defaultRange = MutableStateFlow(runCatching { DateRange.valueOf(prefs.getString("range", null) ?: "D7") }.getOrDefault(DateRange.D7))
+    private val _defaultRange = MutableStateFlow(runCatching { DateRange.valueOf(prefs.getString("range", null) ?: "D7") }.getOrDefault(DateRange.D7).let { if (it == DateRange.Custom) DateRange.D7 else it })
     val defaultRange: StateFlow<DateRange> = _defaultRange.asStateFlow()
 
     /** The date range shared by every analytics screen (like the web console's filter). */
-    private val _range = MutableStateFlow(_defaultRange.value)
-    val range: StateFlow<DateRange> = _range.asStateFlow()
-    fun selectRange(r: DateRange) { _range.value = r }
-    fun setDefaultRange(r: DateRange) { _defaultRange.value = r; _range.value = r; prefs.edit().putString("range", r.name).apply() }
+    private val _range = MutableStateFlow(Period(_defaultRange.value))
+    val range: StateFlow<Period> = _range.asStateFlow()
+    fun selectRange(p: Period) { _range.value = p }
+    fun setDefaultRange(r: DateRange) { _defaultRange.value = r; _range.value = Period(r); prefs.edit().putString("range", r.name).apply() }
+
+    /** Seconds between automatic reloads of the open screen (0 = off). */
+    private val _autoRefresh = MutableStateFlow(prefs.getInt("auto", 0))
+    val autoRefresh: StateFlow<Int> = _autoRefresh.asStateFlow()
+    fun setAutoRefresh(sec: Int) { _autoRefresh.value = sec; prefs.edit().putInt("auto", sec).apply() }
 
     private val _auth = MutableStateFlow<AuthState>(AuthState.Checking)
     val auth: StateFlow<AuthState> = _auth.asStateFlow()
