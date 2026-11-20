@@ -546,3 +546,55 @@ nav{position:sticky}
 .dico .ic{width:26px;height:26px}
 .row2{display:flex;gap:10px;width:100%;margin-top:4px}
 .row2 button{flex:1;justify-content:center;min-height:48px;border-radius:14px}
+
+/* =====================================================================
+   v4: login screen. Responsive at every width and readable text:
+   the form sits on a solid-enough surface (not see-through glass), columns
+   can shrink (minmax(0,..)) so nothing overflows, and the hero collapses
+   to a compact brand header on phones.
+   ===================================================================== */
+.auth{min-height:100vh;min-height:100dvh;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);width:100%;overflow-x:hidden}
+.auth .art{min-width:0;padding:clamp(28px,5vw,56px);background:var(--grad)}
+.auth .art h2{font-size:clamp(26px,3.2vw,36px);overflow-wrap:break-word;text-shadow:0 1px 14px rgba(20,16,80,.25)}
+.auth .art p,.auth .art li{font-size:15px;line-height:1.55;opacity:1;color:#fff;overflow-wrap:break-word}
+.auth .art .brand span{font-size:17px;color:#fff}
+.auth .pane{min-width:0;padding:clamp(20px,4vw,40px) clamp(14px,4vw,32px)}
+.auth form{
+  max-width:400px;padding:clamp(22px,4vw,32px);gap:14px;border-radius:24px;
+  background:linear-gradient(var(--bar),var(--bar)) padding-box,linear-gradient(180deg,var(--rim1),var(--rim2)) border-box;
+  -webkit-backdrop-filter:none;backdrop-filter:none}
+.auth form>*{min-width:0}
+.auth form h1{font-size:clamp(24px,6vw,30px);line-height:1.15;color:var(--ink);margin:0}
+.auth form .subtitle{color:var(--mut);font-size:14.5px;line-height:1.5;margin:0 0 4px}
+.auth label{font-size:13.5px;font-weight:650;color:var(--ink);margin-bottom:6px}
+.auth input{font-size:16px;min-height:48px;padding:10px 14px;border-radius:12px;color:var(--ink);background:var(--field,#fff);border:1.5px solid var(--fieldline,rgba(84,86,232,.35))}
+.auth input::placeholder{color:var(--mut);opacity:.85}
+.auth input:focus{border-color:var(--pri);outline:3px solid color-mix(in srgb,var(--pri) 30%,transparent);outline-offset:0}
+.auth button.pri{min-height:50px;font-size:16px;border-radius:14px;width:100%}
+.auth button.link{font-size:14px;min-height:40px;padding:8px 6px;width:100%;color:var(--pri);text-align:center;white-space:normal}
+.auth .err{font-size:14px;line-height:1.45;color:var(--bad);background:var(--bad-soft);border:1px solid color-mix(in srgb,var(--bad) 35%,transparent);margin:0}
+.auth .notice{font-size:13px;line-height:1.45;color:var(--mut);margin:2px 0 0}
+:root{--field:#fff;--fieldline:rgba(84,86,232,.38)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--field:rgba(255,255,255,.08);--fieldline:rgba(255,255,255,.28)}}
+:root[data-theme="dark"]{--field:rgba(255,255,255,.08);--fieldline:rgba(255,255,255,.28)}
+
+/* tablets and phones: one column, compact brand header on top, form below */
+@media (max-width:860px){
+  .auth{display:flex;flex-direction:column;grid-template-columns:none}
+  .auth .art{flex:none;padding:22px 20px 26px;gap:12px;justify-content:flex-start;border-radius:0 0 28px 28px}
+  .auth .art::before{width:260px;height:260px;right:-90px;top:-100px}
+  .auth .art::after{width:180px;height:180px;left:-70px;bottom:-90px}
+  .auth .art h2{font-size:22px;margin:0 0 6px;max-width:none}
+  .auth .art p{font-size:14px;max-width:none}
+  .auth .art ul{display:none}
+  .auth .art .sub{display:none}
+  .auth .pane{flex:1;place-items:start center;padding:22px 16px 32px;margin-top:-14px;position:relative}
+  .auth form{max-width:440px}
+}
+@media (max-width:380px){
+  .auth .art{padding:18px 16px 22px}
+  .auth .pane{padding:18px 12px 28px}
+  .auth form{padding:20px 16px;border-radius:20px}
+}
+/* short landscape phones: keep the form reachable */
+@media (max-height:520px) and (min-width:861px){.auth .art ul{display:none}}

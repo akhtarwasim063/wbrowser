@@ -13,7 +13,7 @@
     },
     {
       "matches": ["*://*.youtube.com/*"],
-      "js": ["ytviewport.js"],
+      "js": ["ytviewport.js", "ytapp.js"],
       "run_at": "document_start",
       "all_frames": false
     }

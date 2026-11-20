@@ -2,6 +2,7 @@ package dev.wbrowser.nativeapp
 
 import android.app.DownloadManager
 import android.app.PictureInPictureParams
+import android.view.KeyEvent
 import androidx.core.view.ViewCompat
 import android.view.WindowManager
 import android.os.SystemClock
@@ -87,7 +88,6 @@ class MainActivity : AppCompatActivity(), TabHost {
     private lateinit var findBar: View
     private lateinit var findInput: EditText
     private lateinit var findCount: TextView
-    private lateinit var btnPip: View
     private lateinit var btnShowBars: View
 
     private var settingText = false
@@ -176,12 +176,10 @@ class MainActivity : AppCompatActivity(), TabHost {
         findBar = findViewById(R.id.findBar)
         findInput = findViewById(R.id.findInput)
         findCount = findViewById(R.id.findCount)
-        btnPip = findViewById(R.id.btnPip)
         btnShowBars = findViewById(R.id.btnShowBars)
-        btnPip.setOnClickListener { enterMiniPlayer() }
         btnShowBars.setOnClickListener { setBarsHidden(false) }
         // springy press feedback on the toolbar buttons
-        listOf(btnBack, btnForward, btnReload, btnShield, btnPip, findViewById<View>(R.id.btnHome), findViewById<View>(R.id.btnTabs), findViewById<View>(R.id.btnMenu)).forEach { it.pressFx() }
+        listOf(btnBack, btnForward, btnReload, btnShield, findViewById<View>(R.id.btnHome), findViewById<View>(R.id.btnTabs), findViewById<View>(R.id.btnMenu)).forEach { it.pressFx() }
     }
 
     private fun applySystemBars() {
@@ -200,6 +198,7 @@ class MainActivity : AppCompatActivity(), TabHost {
 
     override fun onResume() {
         super.onResume()
+        if (exitFullscreenOnReturn && !inPip) { exitFullscreenOnReturn = false; current?.session?.exitFullScreen() }
         syncUi()
         Tracker.onAppForeground(current)
     }
@@ -216,6 +215,7 @@ class MainActivity : AppCompatActivity(), TabHost {
     override fun onStop() {
         super.onStop()
         android.util.Log.d("WBMedia", "activity onStop playing=${current?.isPlayingMedia} pip=$inPip")
+        if (!inPip && current?.isFullscreenVideo == true) exitFullscreenOnReturn = true
     }
 
     override fun onDestroy() {
@@ -401,7 +401,6 @@ class MainActivity : AppCompatActivity(), TabHost {
             }
         )
         topBar.setBackgroundColor(if (t.isPrivate) ColorUtils.setAlphaComponent(getColor(R.color.wb_private), 40) else 0)
-        btnPip.visibility = if ((t.isPlayingMedia || t.isFullscreenVideo) && !inPip) View.VISIBLE else View.GONE
     }
 
     // ======================= scroll-to-hide toolbar =======================
@@ -444,6 +443,31 @@ class MainActivity : AppCompatActivity(), TabHost {
         if (tab === current) syncUi() else tabCount.text = tabs.size.toString()
         if (tabSwitcher.visibility == View.VISIBLE) tabAdapter.refresh()
     }
+
+    // ======================= YouTube app behaviour: rotation, return from background =======================
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val t = current ?: return
+        if (inPip || !t.isYoutubeWatch) return
+        if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            setBarsHidden(true)                                     // sideways on YouTube: no toolbars at all
+            if (!t.isFullscreenVideo && t.hasMediaSession) ui.postDelayed({ if (current === t && !t.isFullscreenVideo && !inPip) pressKey(KeyEvent.KEYCODE_F) }, 450)
+        } else {
+            if (t.isFullscreenVideo && !inForcedOrientation) t.session.exitFullScreen()
+            setBarsHidden(false)
+        }
+    }
+
+    /** A real key press into the page (YouTube's own "f" shortcut). Unlike a script, a key press counts as the user's, so full screen is allowed. */
+    private fun pressKey(code: Int) {
+        gecko.requestFocus()
+        val now = SystemClock.uptimeMillis()
+        gecko.dispatchKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, code, 0))
+        gecko.dispatchKeyEvent(KeyEvent(now, now + 30, KeyEvent.ACTION_UP, code, 0))
+    }
+
+    /** Set when the app is minimised while a video is full screen: coming back from outside always shows the normal portrait page. */
+    private var exitFullscreenOnReturn = false
 
     // ======================= mini-player (PiP) + background playback =======================
     override fun onMediaChanged(tab: BrowserTab) {
@@ -557,6 +581,7 @@ class MainActivity : AppCompatActivity(), TabHost {
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         inPip = isInPictureInPictureMode
+        if (!isInPictureInPictureMode && current?.isFullscreenVideo == true) ui.postDelayed({ if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) current?.session?.exitFullScreen() }, 250)
         if (!isInPictureInPictureMode) ui.post { if (!lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) MediaBridge.onPause?.invoke() }
         if (isInPictureInPictureMode && Prefs.bool("bg_playback", true)) {
             backgroundResumeWanted = true
@@ -566,7 +591,6 @@ class MainActivity : AppCompatActivity(), TabHost {
         val v = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
         topBar.visibility = v
         bottomBar.visibility = v
-        btnPip.visibility = View.GONE
         btnShowBars.visibility = View.GONE
         if (isInPictureInPictureMode) { hideSwitcher(); closeFind() } else syncUi()
     }
@@ -881,8 +905,11 @@ class MainActivity : AppCompatActivity(), TabHost {
         val t = current
         val portraitVideo = t != null && t.videoHeight > t.videoWidth && t.videoWidth > 0
         if (on) {
-            if (!inForcedOrientation) { wasPortraitBeforeFullscreen = resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_LANDSCAPE; inForcedOrientation = true }
-            requestedOrientation = if (portraitVideo) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            val alreadySideways = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE && !portraitVideo
+            if (!alreadySideways) {
+                if (!inForcedOrientation) { wasPortraitBeforeFullscreen = resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_LANDSCAPE; inForcedOrientation = true }
+                requestedOrientation = if (portraitVideo) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            }
         } else if (inForcedOrientation) {
             inForcedOrientation = false
             // with auto-rotate off, UNSPECIFIED would keep the forced landscape: go back to where the phone was, then let it rotate freely again

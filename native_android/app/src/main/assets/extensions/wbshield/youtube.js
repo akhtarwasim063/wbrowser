@@ -1,53 +1,60 @@
 // WBrowser Shield: backup YouTube ad removal. Runs next to uBlock Origin.
-// The page-world code is injected so it can wrap JSON.parse / fetch before YouTube's player runs.
+// v2: no inline <script> (YouTube's CSP blocked the old version, so it never ran). The page's own JSON.parse / fetch / player-response
+// are wrapped through window.wrappedJSObject + exportFunction, and a small DOM sweep skips ads and hides ad slots.
 (function () {
-  var code = '(' + function () {
-    var keys = ['adPlacements', 'playerAds', 'adSlots', 'adBreakHeartbeatParams'];
-    function prune(o) {
-      if (o && typeof o === 'object') {
-        for (var i = 0; i < keys.length; i++) {
-          if (keys[i] in o) { try { delete o[keys[i]]; } catch (e) {} }
-        }
-      }
-      return o;
-    }
-    var _parse = JSON.parse;
-    JSON.parse = function () { return prune(_parse.apply(this, arguments)); };
-    if (window.Response && Response.prototype.json) {
-      var _json = Response.prototype.json;
-      Response.prototype.json = function () { return _json.apply(this, arguments).then(prune); };
-    }
-    var pr;
+  var W = window.wrappedJSObject;
+  if (!W) return;
+
+  var KEYS = ['adPlacements', 'playerAds', 'adSlots', 'adBreakHeartbeatParams'];
+  function prune(o) {
     try {
-      Object.defineProperty(window, 'ytInitialPlayerResponse', {
-        configurable: true,
-        get: function () { return pr; },
-        set: function (v) { pr = prune(v); }
-      });
-    } catch (e) {}
-  } + ')();';
-
-  var s = document.createElement('script');
-  s.textContent = code;
-  (document.head || document.documentElement).appendChild(s);
-  s.remove();
-
-  // Content-script side: skip whatever ad still plays, hide ad containers.
-  function tick() {
-    var skip = document.querySelector('.ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern');
-    if (skip) skip.click();
-    var player = document.querySelector('.html5-video-player.ad-showing');
-    var v = document.querySelector('video');
-    if (player && v && isFinite(v.duration)) { v.muted = true; v.currentTime = v.duration; }
-    var close = document.querySelector('.ytp-ad-overlay-close-button');
-    if (close) close.click();
+      if (o && typeof o === 'object') {
+        var u = (typeof XPCNativeWrapper !== 'undefined' && XPCNativeWrapper.unwrap) ? XPCNativeWrapper.unwrap(o) : o;
+        for (var i = 0; i < KEYS.length; i++) if (KEYS[i] in u) { try { delete u[KEYS[i]]; } catch (e) { /* ignore */ } }
+      }
+    } catch (e) { /* never break the page */ }
+    return o;
   }
-  setInterval(tick, 400);
 
-  var st = document.createElement('style');
-  st.textContent = '#player-ads,#masthead-ad,ytd-ad-slot-renderer,ytd-promoted-sparkles-web-renderer,' +
-    'ytd-display-ad-renderer,.ytp-ad-overlay-container,.ytp-ad-module,ytd-banner-promo-renderer,' +
-    'ytm-promoted-sparkles-web-renderer,ytm-companion-ad-renderer,ytd-in-feed-ad-layout-renderer,' +
-    'ytd-ad-slot-renderer,ytm-promoted-video-renderer{display:none!important}';
-  (document.head || document.documentElement).appendChild(st);
+  // ads are described inside the JSON YouTube loads: remove those parts before the player sees them
+  try {
+    var parse = W.JSON.parse;
+    W.JSON.parse = exportFunction(function (text, reviver) { return prune(parse.call(W.JSON, text, reviver)); }, W);
+  } catch (e) { /* ignore */ }
+  try {
+    var proto = W.Response.prototype, json = proto.json;
+    proto.json = exportFunction(function () {
+      return json.call(this).then(exportFunction(function (r) { return prune(r); }, W));
+    }, W);
+  } catch (e) { /* ignore */ }
+  try {
+    var pr;
+    Object.defineProperty(W, 'ytInitialPlayerResponse', {
+      configurable: true,
+      get: exportFunction(function () { return pr; }, W),
+      set: exportFunction(function (v) { pr = prune(v); }, W),
+    });
+  } catch (e) { /* ignore */ }
+
+  // whatever still gets through: skip it, and hide the slots that are only ads
+  var HIDE = ['.ytp-ad-overlay-container', '.ytp-ad-text-overlay', 'ytd-ad-slot-renderer', 'ytd-in-feed-ad-layout-renderer', 'ytd-display-ad-renderer',
+    'ytd-promoted-sparkles-web-renderer', 'ytd-promoted-video-renderer', '#masthead-ad', 'ytd-banner-promo-renderer', 'ytd-statement-banner-renderer'].join(',');
+  var mutedByUs = false;
+  function sweep() {
+    try {
+      var p = document.getElementById('movie_player');
+      var v = p && p.querySelector('video');
+      if (p && p.classList.contains('ad-showing')) {
+        var skip = p.querySelector('.ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-ad-skip-button-container button');
+        if (skip) skip.click();
+        if (v && isFinite(v.duration) && v.duration > 0) {
+          if (!v.muted) { v.muted = true; mutedByUs = true; }
+          v.currentTime = v.duration;               // jump to the end of the ad
+        }
+      } else if (v && mutedByUs) { v.muted = false; mutedByUs = false; }
+      var slots = document.querySelectorAll(HIDE);
+      for (var i = 0; i < slots.length; i++) slots[i].style.setProperty('display', 'none', 'important');
+    } catch (e) { /* ignore */ }
+  }
+  setInterval(sweep, 600);
 })();

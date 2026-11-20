@@ -161,6 +161,14 @@ class BrowserTab(private val host: TabHost, val isPrivate: Boolean) {
         session.settings.userAgentMode = if (on) GeckoSessionSettings.USER_AGENT_MODE_DESKTOP else GeckoSessionSettings.USER_AGENT_MODE_MOBILE
     }
 
+    /** A YouTube watch page: the pages that get the app-like behaviour (rotate = full screen, docked player). */
+    val isYoutubeWatch: Boolean
+        get() {
+            val u = Uri.parse(url)
+            val h = u.host?.lowercase().orEmpty()
+            return h == "youtu.be" || ((h == "youtube.com" || h.endsWith(".youtube.com")) && u.path?.startsWith("/watch") == true)
+        }
+
     val isNewTab get() = Prefs.isNewTab(url)
     val loading get() = progress in 1..99
 
