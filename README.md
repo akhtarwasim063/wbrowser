@@ -30,13 +30,13 @@ Current feature branch: `feature/background-playback-pip` (background playback, 
 | Folder | What it is | Tech |
 |---|---|---|
 | `native_android/` | The WBrowser app (`dev.wbrowser.nativeapp`) | Kotlin, Gradle, GeckoView, Firebase Auth + Firestore |
-| `admin_android/` | Admin Android app (`dev.wbrowser.admin`), a wrapper around the admin web page | Kotlin, Gradle, WebView |
+| `admin_android/` | Admin Android app (`dev.wbrowser.admin`), fully native, talks to Firebase directly (the web console in `firebase/public/admin` still works too) | Kotlin, Jetpack Compose, Firebase Auth + Firestore |
 | `firebase/` | Backend: Firestore rules, Hosting, admin web page (`public/admin`), privacy/terms pages, helper scripts, `legal/` source | Firebase, Node.js |
 | `docs/` | Research and compliance notes | Markdown |
 
 ## Run
     cd native_android && gradlew installDebug
-    cd admin_android  && gradlew installDebug -PADMIN_URL=https://<project>.web.app/admin/
+    cd admin_android  && gradlew installDebug
 
 Android Studio steps (which folder to open, run configuration): `docs/ANDROID_STUDIO_SETUP.md`. Firebase setup is in `firebase/README.md`. Compliance notes are in `docs/RESEARCH_AND_COMPLIANCE.md`.
 The earlier Flutter prototype and the Node/SQLite backend were removed (still in git history before the cleanup commit).

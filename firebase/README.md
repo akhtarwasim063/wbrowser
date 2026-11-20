@@ -39,7 +39,7 @@ Roles: **superadmin** (read everything, delete, suspend) and **analyst** (read-o
 7. Build the apps. The browser app needs no flags (it reads `google-services.json`):
 
        cd native_android && gradlew installDebug
-       cd admin_android  && gradlew installDebug -PADMIN_URL=https://<project>.web.app/admin/
+       cd admin_android  && gradlew installDebug
 
 ## Test locally without a Firebase project
     npx firebase emulators:start --only auth,firestore,hosting --project demo-wbrowser    (needs Java)
