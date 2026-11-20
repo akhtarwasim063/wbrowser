@@ -7,6 +7,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.ui.text.style.TextAlign
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -282,14 +290,39 @@ fun GlassSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
     Switch(checked, onChange, colors = SwitchDefaults.colors(checkedTrackColor = p.pri, checkedThumbColor = Color.White, uncheckedTrackColor = p.soft, uncheckedThumbColor = p.mut, uncheckedBorderColor = p.line))
 }
 
+/** Every confirmation / message in the app is a bottom sheet (never a centred dialog). */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ConfirmDialog(title: String, text: String, confirm: String, danger: Boolean = true, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+private fun ActionSheet(icon: String, tone: Color, title: String, text: String, onDismiss: () -> Unit, content: @Composable (close: (() -> Unit) -> Unit) -> Unit) {
     val p = palette()
-    AlertDialog(
-        onDismissRequest = onDismiss, title = { Text(title) }, text = { Text(text) },
-        confirmButton = { TextButton(onClick = { onDismiss(); onConfirm() }) { Text(confirm, color = if (danger) p.bad else p.pri) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+    val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    // slide the sheet away first, then run the chosen action
+    val close: (() -> Unit) -> Unit = { after -> scope.launch { state.hide() }.invokeOnCompletion { onDismiss(); after() } }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state, containerColor = p.card, contentColor = p.ink) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(bottom = 18.dp).navigationBarsPadding().imePadding(),
+            verticalArrangement = Arrangement.spacedBy(12.dp), horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(Modifier.size(52.dp).clip(RoundedCornerShape(18.dp)).background(tone.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) { Ico(icon, tone, 26.dp) }
+            Text(title, color = p.ink, fontWeight = FontWeight.Bold, fontSize = 18.sp, textAlign = TextAlign.Center)
+            Text(text, color = p.mut, fontSize = 13.sp, textAlign = TextAlign.Center)
+            content(close)
+        }
+    }
+}
+
+private val SheetButton = Modifier.heightIn(min = 48.dp)
+
+@Composable
+fun ConfirmDialog(title: String, text: String, confirm: String, danger: Boolean = true, icon: String? = null, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    val p = palette()
+    ActionSheet(icon ?: if (danger) "trash" else "check", if (danger) p.bad else p.pri, title, text, onDismiss) { close ->
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            GlassButton("Cancel", null, SheetButton.weight(1f)) { close {} }
+            GlassButton(confirm, null, SheetButton.weight(1f), danger = danger, primary = !danger) { close(onConfirm) }
+        }
+    }
 }
 
 /** Destructive, wide-reaching actions need the word DELETE typed first (same as the web console). */
@@ -297,22 +330,22 @@ fun ConfirmDialog(title: String, text: String, confirm: String, danger: Boolean 
 fun TypeDeleteDialog(text: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
     val p = palette()
     var typed by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss, title = { Text("Are you sure?") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(text)
-                OutlinedTextField(typed, { typed = it }, singleLine = true, label = { Text("Type DELETE to confirm") })
-            }
-        },
-        confirmButton = { TextButton(onClick = { onDismiss(); onConfirm() }, enabled = typed == "DELETE") { Text("Delete", color = if (typed == "DELETE") p.bad else p.mut) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+    ActionSheet("trash", p.bad, "Are you sure?", text, onDismiss) { close ->
+        OutlinedTextField(typed, { typed = it }, singleLine = true, label = { Text("Type DELETE to confirm") }, modifier = Modifier.fillMaxWidth())
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            GlassButton("Cancel", null, SheetButton.weight(1f)) { close {} }
+            GlassButton("Delete", null, SheetButton.weight(1f), danger = true, enabled = typed == "DELETE") { close(onConfirm) }
+        }
+    }
 }
 
 @Composable
 fun MessageDialog(title: String, text: String, onDismiss: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = { Text(text) }, confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } })
+    val p = palette()
+    val bad = title.contains("fail", ignoreCase = true)
+    ActionSheet(if (bad) "pause" else "check", if (bad) p.bad else p.ok, title, text, onDismiss) { close ->
+        GlassButton("OK", null, SheetButton.fillMaxWidth(), primary = true) { close {} }
+    }
 }
 
 @Composable

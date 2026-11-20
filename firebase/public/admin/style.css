@@ -531,3 +531,18 @@ nav{position:sticky}
 
 /* neutral chips stay readable on glass */
 .pill{color:var(--ink)}
+
+/* ----- confirmation / message sheets (replace the browser's dialogs) ----- */
+@keyframes fadeout{to{opacity:0}}
+.overlay.out{animation:fadeout .19s both}
+.overlay.out .sheet{transform:translateY(40px);opacity:0;transition:transform .19s,opacity .19s}
+.sheet.dlg{text-align:center;justify-items:center;gap:10px;padding:22px 20px 18px}
+.dlg h3{margin:0;font-size:18px;letter-spacing:-.01em}
+.dlg p{margin:0;color:var(--mut);font-size:13px;max-width:38ch;overflow-wrap:anywhere}
+.dlg input{width:100%;min-height:46px;text-align:center}
+.dico{width:52px;height:52px;border-radius:18px;display:grid;place-items:center;background:var(--pri-soft);color:var(--pri)}
+.dico.bad{background:var(--bad-soft);color:var(--bad)}
+.dico.ok{background:var(--ok-soft);color:var(--ok)}
+.dico .ic{width:26px;height:26px}
+.row2{display:flex;gap:10px;width:100%;margin-top:4px}
+.row2 button{flex:1;justify-content:center;min-height:48px;border-radius:14px}

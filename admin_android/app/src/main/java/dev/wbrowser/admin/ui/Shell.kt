@@ -64,13 +64,14 @@ private data class Screen(val route: Route?, val tab: Int, val depth: Int)
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
-fun MainShell(vm: AdminViewModel, me: Me) {
+fun MainShell(vm: AdminViewModel, me: Me, onExitRequest: () -> Unit) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val stack by vm.stack.collectAsState()
     val top = stack.lastOrNull()
     val auto by vm.autoRefresh.collectAsState()
     BackHandler(enabled = top != null) { vm.pop() }
     BackHandler(enabled = top == null && tab != 0) { tab = 0 }
+    BackHandler(enabled = top == null && tab == 0) { onExitRequest() }   // back on the first screen asks before closing
 
     // which bottom tab stays lit while a detail screen is open
     val lit = when (top) {

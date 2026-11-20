@@ -2,6 +2,7 @@ package dev.wbrowser.admin
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -15,10 +16,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import dev.wbrowser.admin.ui.AdminTheme
+import dev.wbrowser.admin.ui.ConfirmDialog
 import dev.wbrowser.admin.ui.CrystalBackground
 import dev.wbrowser.admin.ui.WithGlassMotion
 import dev.wbrowser.admin.ui.LoginScreen
@@ -40,15 +45,18 @@ class MainActivity : ComponentActivity() {
             AdminTheme(mode) {
               WithGlassMotion {
                 val auth by vm.auth.collectAsState()
+                var exitAsk by remember { mutableStateOf(false) }
+                BackHandler(enabled = auth !is AuthState.SignedIn) { exitAsk = true }
                 Box(Modifier.fillMaxSize().background(palette().bg)) {
                     CrystalBackground()
                     AnimatedContent(auth, transitionSpec = { fadeIn(tween(350)) togetherWith fadeOut(tween(250)) }, contentKey = { it::class }, label = "auth") { s ->
                         when (s) {
                             is AuthState.Checking -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = palette().pri) }
                             is AuthState.SignedOut -> LoginScreen(s, vm::signIn, vm::forgotPassword)
-                            is AuthState.SignedIn -> MainShell(vm, s.me)
+                            is AuthState.SignedIn -> MainShell(vm, s.me) { exitAsk = true }
                         }
                     }
+                    if (exitAsk) ConfirmDialog("Exit WBrowser Admin?", "Do you want to close the app?", "Exit", danger = false, icon = "out", onConfirm = { finish() }, onDismiss = { exitAsk = false })
                 }
               }
             }

@@ -196,6 +196,29 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
   const searchBox = (placeholder, on) => h('div', { class: 'search' }, ico('search'), h('input', { placeholder, oninput: (e) => on(e.target.value) }));
 
 
+  // ---------- bottom-sheet dialogs (replace the browser's confirm / alert / prompt) ----------
+  function dialogSheet({ icon, tone = '', title, text, field, actions }) {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (v) => { if (done) return; done = true; ov.classList.add('out'); setTimeout(() => ov.remove(), 190); resolve(v); };
+      const input = field ? h('input', { placeholder: field, autocomplete: 'off', autocapitalize: 'off', oninput: () => sync() }) : null;
+      const btns = actions.map((a) => h('button', { class: a.cls || '', onclick: () => finish(a.value(input)) }, a.label));
+      const sync = () => actions.forEach((a, i) => { if (a.needs) btns[i].disabled = !a.needs(input); });
+      const ov = h('div', { class: 'overlay', onclick: (e) => { if (e.target === ov) finish(actions.find((a) => a.cancel).value(input)); } },
+        h('div', { class: 'sheet dlg' }, h('div', { class: 'dico ' + tone }, ico(icon)), h('h3', {}, title), h('p', {}, text), input, h('div', { class: 'row2' }, btns)));
+      document.body.append(ov); sync(); input?.focus();
+    });
+  }
+  const risky = (t) => /delete|erase|clear|permanently/i.test(t);
+  const ask = (text, title) => dialogSheet({ icon: risky(text) ? 'trash' : 'check', tone: risky(text) ? 'bad' : '', title: title || (risky(text) ? 'Are you sure?' : 'Please confirm'), text,
+    actions: [{ label: 'Cancel', value: () => false, cancel: true }, { label: risky(text) ? 'Delete' : 'Confirm', cls: risky(text) ? 'bad' : 'pri', value: () => true }] });
+  const askType = (text) => dialogSheet({ icon: 'trash', tone: 'bad', title: 'Are you sure?', text, field: 'Type DELETE to confirm',
+    actions: [{ label: 'Cancel', value: () => null, cancel: true }, { label: 'Delete', cls: 'bad', needs: (i) => i.value === 'DELETE', value: () => 'DELETE' }] });
+  const notify = (text, title) => {
+    const bad = /fail|error|invalid|expired|too many|not permitted/i.test(String(text));
+    return dialogSheet({ icon: bad ? 'pause' : 'check', tone: bad ? 'bad' : 'ok', title: title || (bad ? 'Something went wrong' : 'Done'), text: String(text), actions: [{ label: 'OK', cls: 'pri', value: () => true, cancel: true }] });
+  };
+
   // ---------- press and hold: select rows, then delete several at once ----------
   let sel = null, selBar = null;
   function endSelect() { sel = null; selBar?.remove(); selBar = null; document.querySelectorAll('.overlay').forEach((o) => o.remove()); document.querySelectorAll('.selecting').forEach((e) => e.classList.remove('selecting')); }
@@ -215,8 +238,8 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
   function selectable(box, rows, kind, base, reload) {
     const trs = [...box.querySelectorAll('tbody tr')];
     const del = async (ids) => {
-      if (!ids.length || !confirm(`Delete ${ids.length} ${ids.length === 1 ? 'entry' : 'entries'}?`)) return;
-      try { await api(`${base}/${kind}`, { method: 'DELETE', body: { ids } }); endSelect(); reload(); } catch (er) { alert(er.message); }
+      if (!ids.length || !await ask(`Delete ${ids.length} ${ids.length === 1 ? 'entry' : 'entries'}?`)) return;
+      try { await api(`${base}/${kind}`, { method: 'DELETE', body: { ids } }); endSelect(); reload(); } catch (er) { notify(er.message); }
     };
     const startSelect = (firstId) => {
       sel = new Set([firstId]);
@@ -334,17 +357,17 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
         if (can('manage_users')) {
           actions.append(
             btn('pause', u.status === 'active' ? 'Suspend uploads' : 'Reactivate', { onclick: async () => { await api(`/users/${id}`, { method: 'PATCH', body: { status: u.status === 'active' ? 'suspended' : 'active' } }); loadHead(); } }),
-            btn('trash', 'Erase user', { class: 'bad', onclick: async () => { if (confirm(`Permanently erase ${u.name} and all their data?`)) { await api(`/users/${id}`, { method: 'DELETE' }); location.hash = '#/users'; } } }));
+            btn('trash', 'Erase user', { class: 'bad', onclick: async () => { if (await ask(`Permanently erase ${u.name} and all their data?`)) { await api(`/users/${id}`, { method: 'DELETE' }); location.hash = '#/users'; } } }));
         }
         if (can('delete_data')) {
           const wipe = (what, path, msg) => btn('trash', `Clear ${what}`, { class: 'bad', onclick: async () => {
-            if (!confirm(msg)) return;
-            try { const r = await api(path, { method: 'DELETE' }); alert(`Deleted ${r.deleted} ${what}.`); loadHead(); loadBody(); } catch (er) { alert(er.message); }
+            if (!await ask(msg)) return;
+            try { const r = await api(path, { method: 'DELETE' }); notify(`Deleted ${r.deleted} ${what}.`); loadHead(); loadBody(); } catch (er) { notify(er.message); }
           } });
           actions.append(wipe('history', `/users/${encodeURIComponent(id)}/history`, `Delete ALL browsing history and sessions of ${u.name}?`),
             wipe('searches', `/users/${encodeURIComponent(id)}/searches`, `Delete ALL search queries of ${u.name}?`));
         }
-        if (can('export')) actions.append(btn('download', 'Export CSV', { onclick: async () => { try { await csvDownload(id, range()); } catch (er) { alert(er.message); } } }));
+        if (can('export')) actions.append(btn('download', 'Export CSV', { onclick: async () => { try { await csvDownload(id, range()); } catch (er) { notify(er.message); } } }));
         head.replaceChildren(
           h('div', { class: 'card' }, h('div', { class: 'hero' }, avatar(u.name, 'lg'),
             h('div', { class: 'info' }, h('h2', {}, u.name), h('div', { class: 'sub' }, `${u.code || u.id}${u.email ? ' · ' + u.email : ''}`),
@@ -417,10 +440,10 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
         const d = await api('/server-info');
         const row = (k, v) => h('tr', {}, h('th', {}, k), h('td', {}, v));
         const danger = (scope, label) => btn('trash', `Clear ${label}`, { class: 'bad', onclick: async (e) => {
-          const w = prompt(`This permanently deletes ${label} for ALL users. Type DELETE to confirm:`);
+          const w = await askType(`This permanently deletes ${label} for ALL users. Type DELETE to confirm:`);
           if (w !== 'DELETE') return;
           e.currentTarget.disabled = true;
-          try { const r = await api('/data', { method: 'DELETE', body: { scope, confirm: 'DELETE' } }); alert('Deleted: ' + JSON.stringify(r.deleted)); } catch (er) { alert(er.message); }
+          try { const r = await api('/data', { method: 'DELETE', body: { scope, confirm: 'DELETE' } }); notify('Deleted: ' + JSON.stringify(r.deleted)); } catch (er) { notify(er.message); }
           load();
         } });
         box.replaceChildren(
@@ -451,8 +474,8 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
   async function viewAccount(box) {
     const form = h('form', { class: 'card', onsubmit: async (e) => {
       e.preventDefault(); const f = e.target;
-      try { await api('/auth/change-password', { method: 'POST', body: { current: f.current.value, next: f.next.value } }); f.reset(); alert('Password changed.'); }
-      catch (er) { alert('Failed: ' + er.message + ' (new password needs 12+ characters)'); }
+      try { await api('/auth/change-password', { method: 'POST', body: { current: f.current.value, next: f.next.value } }); f.reset(); notify('Password changed.'); }
+      catch (er) { notify('Failed: ' + er.message + ' (new password needs 12+ characters)'); }
     } }, h('h2', {}, 'Change password'), h('p', { class: 'hint' }, `Signed in as ${me.email} (${me.role}).`),
       h('div', { class: 'row' }, h('input', { name: 'current', type: 'password', placeholder: 'Current password', autocomplete: 'current-password', required: true }),
         h('input', { name: 'next', type: 'password', placeholder: 'New password (12+ chars)', autocomplete: 'new-password', required: true }), h('button', { class: 'pri' }, 'Update password')));
@@ -532,7 +555,7 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
         const num = (k, min, max) => h('input', { type: 'number', min, max, value: st[k], oninput: (e) => { st[k] = e.target.value; } });
         const row = (title, hint, control) => h('div', { class: 'setting' }, h('div', {}, h('b', {}, title), h('div', { class: 'sub' }, hint)), control);
         const ann = h('input', { type: 'text', maxlength: 200, value: st.announcement, placeholder: 'Shown inside the phone app (optional)', oninput: (e) => { st.announcement = e.target.value; } });
-        const save = btn('check', 'Save settings', { class: 'pri', onclick: async (e) => { e.currentTarget.disabled = true; try { await api('/config', { method: 'PUT', body: st }); alert('Saved. Phones pick this up at their next sync.'); } catch (er) { alert(er.message); } load(); } });
+        const save = btn('check', 'Save settings', { class: 'pri', onclick: async (e) => { e.currentTarget.disabled = true; try { await api('/config', { method: 'PUT', body: st }); notify('Saved. Phones pick this up at their next sync.'); } catch (er) { notify(er.message); } load(); } });
         box.replaceChildren(
           card('Remote app settings', 'Saved in Firebase. Every phone reads these at its next sync, and the security rules enforce the first two switches even if an app ignored them.',
             row('Collect browsing activity', 'Off = every phone stops uploading immediately (kill switch)', onoff(st.trackingEnabled, (v) => { st.trackingEnabled = v; })),
@@ -544,9 +567,9 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
           card('Delete old data', 'Permanently deletes visits, sessions and searches older than the retention period for every user.',
             h('div', { class: 'row' }, btn('trash', 'Delete data older than the retention period', { class: 'bad', onclick: async (e) => {
               const d = parseInt(st.retentionDays, 10) || 180;
-              if (prompt(`Delete everything older than ${d} days for ALL users? Type DELETE to confirm:`) !== 'DELETE') return;
+              if (await askType(`Delete everything older than ${d} days for ALL users? Type DELETE to confirm:`) !== 'DELETE') return;
               e.currentTarget.disabled = true;
-              try { const r = await api('/purge', { method: 'POST', body: { days: d } }); alert('Deleted: ' + JSON.stringify(r.deleted)); } catch (er) { alert(er.message); }
+              try { const r = await api('/purge', { method: 'POST', body: { days: d } }); notify('Deleted: ' + JSON.stringify(r.deleted)); } catch (er) { notify(er.message); }
               load();
             } }))),
           card('Accounts and deletion', null,
@@ -587,10 +610,10 @@ import { api as fbApi, initFirebase, configured, csvDownload, refreshData, watch
       msg ? h('div', { class: 'err' }, msg) : null, h('button', { class: 'pri' }, 'Sign in'),
       h('button', { type: 'button', class: 'link', onclick: async (e) => {
         const email = f.email.value.trim();
-        if (!email) { f.email.focus(); alert('Type your admin email first, then tap "Forgot password?".'); return; }
+        if (!email) { f.email.focus(); notify('Type your admin email first, then tap "Forgot password?".'); return; }
         e.currentTarget.disabled = true;
-        try { await api('/auth/reset', { method: 'POST', body: { email } }); alert('If that email belongs to an admin, a password reset link has been sent to it. Check your inbox (and spam).'); }
-        catch (er) { alert(er.message === 'too_many_attempts' ? 'Too many requests. Try again later.' : er.message); }
+        try { await api('/auth/reset', { method: 'POST', body: { email } }); notify('If that email belongs to an admin, a password reset link has been sent to it. Check your inbox (and spam).'); }
+        catch (er) { notify(er.message === 'too_many_attempts' ? 'Too many requests. Try again later.' : er.message); }
         e.currentTarget.disabled = false;
       } }, 'Forgot password?'),
       h('p', { class: 'notice' }, 'Access is limited to authorised administrators. Activity is logged.'));
