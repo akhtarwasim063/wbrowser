@@ -12,7 +12,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -34,7 +33,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Surface
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -44,8 +43,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.composed
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -67,7 +66,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.wbrowser.admin.data.DateRange
 import dev.wbrowser.admin.data.SiteStat
 import kotlinx.coroutines.delay
 import java.text.NumberFormat
@@ -97,6 +95,9 @@ fun ago(ms: Long): String {
     }
 }
 
+/** Medium date + short time in the phone's locale, e.g. "Nov 20, 2026, 3:05 PM". */
+fun dt(ms: Long): String = if (ms <= 0) "—" else java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(java.util.Date(ms))
+
 fun initials(name: String): String =
     name.trim().split(Regex("\\s+")).take(2).mapNotNull { it.firstOrNull()?.uppercaseChar() }.joinToString("").ifEmpty { "?" }
 
@@ -118,7 +119,7 @@ fun Reveal(index: Int = 0, modifier: Modifier = Modifier, content: @Composable (
     var shown by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(index.coerceAtMost(8) * 55L); shown = true }
     val a by animateFloatAsState(if (shown) 1f else 0f, tween(480, easing = FastOutSlowInEasing), label = "reveal")
-    Box(modifier.graphicsLayer { alpha = a; translationY = (1f - a) * 48f }) { content() }
+    Box(modifier.graphicsLayer { alpha = a; translationY = (1f - a) * 40f }) { content() }
 }
 
 /** Springy press feedback for anything tappable. */
@@ -138,98 +139,92 @@ fun AnimatedNumber(target: Long, format: (Long) -> String, style: TextStyle, col
 fun Modifier.shimmer(): Modifier {
     val p = palette()
     val t = rememberInfiniteTransition(label = "shimmer")
-    val x by t.animateFloat(-1f, 2f, infiniteRepeatable(tween(1200, easing = LinearEasing), RepeatMode.Restart), label = "x")
-    return this.background(Brush.horizontalGradient(listOf(p.soft, p.line, p.soft), startX = x * 600f, endX = x * 600f + 600f), RoundedCornerShape(18.dp))
+    val x by t.animateFloat(-1f, 2f, infiniteRepeatable(tween(1300, easing = LinearEasing), RepeatMode.Restart), label = "x")
+    return this.clip(RoundedCornerShape(20.dp))
+        .background(Brush.horizontalGradient(listOf(p.glassFill, p.glassRimTop.copy(alpha = 0.5f), p.glassFill), startX = x * 600f, endX = x * 600f + 600f))
 }
 
 // ---------- surfaces ----------
 @Composable
-fun AdminCard(modifier: Modifier = Modifier, padding: Dp = 18.dp, content: @Composable () -> Unit) {
-    val p = palette()
-    Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = p.card, border = BorderStroke(1.dp, p.line), tonalElevation = 0.dp, shadowElevation = if (p.dark) 0.dp else 1.dp) {
-        Box(Modifier.padding(padding)) { content() }
-    }
-}
+fun AdminCard(modifier: Modifier = Modifier, padding: Dp = 14.dp, content: @Composable () -> Unit) = GlassCard(modifier, padding, content = content)
 
 @Composable
 fun CardTitle(title: String, hint: String? = null) {
     val p = palette()
-    Column(Modifier.padding(bottom = 12.dp)) {
-        Text(title, style = androidx.compose.material3.MaterialTheme.typography.titleMedium, color = p.ink)
-        if (hint != null) Text(hint, style = androidx.compose.material3.MaterialTheme.typography.bodySmall, color = p.mut)
+    Column(Modifier.padding(bottom = 8.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium, color = p.ink)
+        if (hint != null) Text(hint, style = MaterialTheme.typography.bodySmall, color = p.mut)
     }
 }
 
 enum class Tone { Pri, Cyan, Ok, Warn, Violet }
 
 @Composable
-private fun toneColors(t: Tone): Pair<Color, Color> {
+private fun toneColor(t: Tone): Color {
     val p = palette()
-    return when (t) {
-        Tone.Pri -> p.pri to p.priSoft
-        Tone.Cyan -> p.cyan to p.cyan.copy(alpha = 0.16f)
-        Tone.Ok -> p.ok to p.okSoft
-        Tone.Warn -> p.warn to p.warnSoft
-        Tone.Violet -> p.violet to p.violet.copy(alpha = 0.16f)
-    }
+    return when (t) { Tone.Pri -> p.pri; Tone.Cyan -> p.cyan; Tone.Ok -> p.ok; Tone.Warn -> p.warn; Tone.Violet -> p.violet }
 }
 
+/** Compact stat tile: icon on the left, number and label on the right. */
 @Composable
 fun KpiCard(icon: String, tone: Tone, value: Long, format: (Long) -> String, label: String, modifier: Modifier = Modifier) {
     val p = palette()
-    val (fg, bg) = toneColors(tone)
+    val fg = toneColor(tone)
     val src = remember { MutableInteractionSource() }
-    Surface(
-        modifier.pressScale(src, 0.97f).height(118.dp),
-        shape = RoundedCornerShape(20.dp), color = p.card, border = BorderStroke(1.dp, p.line), shadowElevation = if (p.dark) 0.dp else 1.dp,
-    ) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = Arrangement.SpaceBetween) {
-            Box(Modifier.size(38.dp).clip(RoundedCornerShape(11.dp)).background(bg), contentAlignment = Alignment.Center) { Ico(icon, fg, 19.dp) }
-            Column {
-                AnimatedNumber(value, format, androidx.compose.material3.MaterialTheme.typography.headlineMedium.copy(fontSize = 24.sp), p.ink)
-                Text(label, style = androidx.compose.material3.MaterialTheme.typography.bodySmall, color = p.mut, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    Box(modifier.pressScale(src, 0.97f).height(74.dp).glass(RoundedCornerShape(18.dp), lift = 6.dp)) {
+        Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(34.dp).clip(RoundedCornerShape(11.dp)).background(Brush.linearGradient(listOf(fg.copy(alpha = 0.32f), fg.copy(alpha = 0.10f)))),
+                contentAlignment = Alignment.Center,
+            ) { Ico(icon, fg, 17.dp) }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+                AnimatedNumber(value, format, MaterialTheme.typography.titleLarge.copy(fontSize = 18.sp, lineHeight = 22.sp), p.ink)
+                Text(label, style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.5.sp, lineHeight = 13.sp), color = p.mut, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
     }
 }
 
 @Composable
-fun Avatar(name: String, size: Dp = 38.dp, square: Boolean = false, text: String = initials(name)) {
+fun Avatar(name: String, size: Dp = 34.dp, square: Boolean = false, text: String = initials(name)) {
     val (a, b) = remember(name) { toneOf(name) }
     Box(
-        Modifier.size(size).clip(if (square) RoundedCornerShape(10.dp) else CircleShape).background(Brush.linearGradient(listOf(a, b))),
+        Modifier.size(size).clip(if (square) RoundedCornerShape(9.dp) else CircleShape).background(Brush.linearGradient(listOf(a, b))),
         contentAlignment = Alignment.Center,
-    ) { Text(text, color = Color.White, fontWeight = FontWeight.Bold, fontSize = (size.value * 0.34f).sp) }
+    ) { Text(text, color = Color.White, fontWeight = FontWeight.Bold, fontSize = (size.value * 0.36f).sp) }
 }
 
 @Composable
 fun Pill(text: String, fg: Color, bg: Color) {
-    Box(Modifier.clip(RoundedCornerShape(99.dp)).background(bg).padding(horizontal = 10.dp, vertical = 3.dp)) {
-        Text(text, color = fg, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+    Box(Modifier.clip(RoundedCornerShape(99.dp)).background(bg).padding(horizontal = 9.dp, vertical = 2.dp)) {
+        Text(text, color = fg, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 
 @Composable
 fun Empty(text: String) {
-    Box(Modifier.fillMaxWidth().padding(28.dp), contentAlignment = Alignment.Center) { Text(text, color = palette().mut, style = androidx.compose.material3.MaterialTheme.typography.bodyMedium) }
+    Box(Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) { Text(text, color = palette().mut, style = MaterialTheme.typography.bodyMedium) }
 }
 
+/** Glass segmented control with a brand-coloured selected pill. */
 @Composable
-fun RangeChips(selected: DateRange, onSelect: (DateRange) -> Unit) {
+fun <T> Segmented(options: List<T>, selected: T, label: (T) -> String, onSelect: (T) -> Unit, modifier: Modifier = Modifier) {
     val p = palette()
     Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).clip(RoundedCornerShape(16.dp)).background(p.soft).padding(4.dp),
+        modifier.glass(RoundedCornerShape(15.dp), lift = 4.dp).horizontalScroll(rememberScrollState()).padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        DateRange.entries.forEach { r ->
-            val on = r == selected
-            val bg by animateColorAsState(if (on) p.card else Color.Transparent, tween(220), label = "chipbg")
-            val fg by animateColorAsState(if (on) p.ink else p.mut, tween(220), label = "chipfg")
+        options.forEach { o ->
+            val on = o == selected
+            val a by animateFloatAsState(if (on) 1f else 0f, tween(260), label = "segbg")
+            val fg by animateColorAsState(if (on) Color.White else p.mut, tween(220), label = "segfg")
             val src = remember { MutableInteractionSource() }
             Box(
-                Modifier.pressScale(src, 0.94f).clip(RoundedCornerShape(12.dp)).background(bg)
-                    .clickable(interactionSource = src, indication = null) { onSelect(r) }.padding(horizontal = 16.dp, vertical = 9.dp),
-            ) { Text(r.label, color = fg, fontWeight = FontWeight.SemiBold, fontSize = 14.sp) }
+                Modifier.pressScale(src, 0.94f).clip(RoundedCornerShape(12.dp))
+                    .background(Brush.horizontalGradient(listOf(p.pri, p.pri2)), alpha = a)
+                    .clickable(interactionSource = src, indication = null) { onSelect(o) }.padding(horizontal = 14.dp, vertical = 7.dp),
+            ) { Text(label(o), color = fg, fontWeight = FontWeight.SemiBold, fontSize = 13.sp) }
         }
     }
 }
@@ -244,16 +239,16 @@ fun AreaChart(labels: List<String>, values: List<Int>, color: Color, modifier: M
     val progress = remember { Animatable(0f) }
     LaunchedEffect(values) { progress.snapTo(0f); progress.animateTo(1f, tween(1100, easing = FastOutSlowInEasing)) }
     var sel by remember(values) { mutableStateOf<Int?>(null) }
-    val axis = TextStyle(fontSize = 10.sp, color = p.mut)
-    val left = with(density) { 38.dp.toPx() }
-    val right = with(density) { 12.dp.toPx() }
-    val top = with(density) { 14.dp.toPx() }
+    val axis = TextStyle(fontSize = 9.sp, color = p.mut)
+    val left = with(density) { 30.dp.toPx() }
+    val right = with(density) { 6.dp.toPx() }
+    val top = with(density) { 8.dp.toPx() }
     val bottom = with(density) { 26.dp.toPx() }
     val n = values.size
     val nice = (ceil(max(1, values.max()) / 4.0) * 4).toInt().coerceAtLeast(4)
 
     Canvas(
-        modifier.fillMaxWidth().height(190.dp).pointerInput(values) {
+        modifier.fillMaxWidth().height(124.dp).pointerInput(values) {
             detectTapGestures { o ->
                 val w = size.width - left - right
                 sel = if (n == 1) 0 else (((o.x - left) / w) * (n - 1)).let { Math.round(it).toInt().coerceIn(0, n - 1) }
@@ -264,11 +259,11 @@ fun AreaChart(labels: List<String>, values: List<Int>, color: Color, modifier: M
         val h = size.height - top - bottom
         fun x(i: Int) = left + if (n == 1) w / 2 else i * w / (n - 1)
         fun y(v: Int) = top + (1f - v.toFloat() / nice) * h
-        for (g in 0..4) {
-            val yy = top + h - h * g / 4f
+        for (g in 0..2) {
+            val yy = top + h - h * g / 2f
             drawLine(p.line, Offset(left, yy), Offset(size.width - right, yy), strokeWidth = 1f)
-            val lbl = measurer.measure(fmt(nice * g / 4), axis)
-            drawText(lbl, topLeft = Offset(left - 8f - lbl.size.width, yy - lbl.size.height / 2f))
+            val lbl = measurer.measure(fmt(nice * g / 2), axis)
+            drawText(lbl, topLeft = Offset(left - 6f - lbl.size.width, if (g == 0) yy - lbl.size.height - 2f else yy - lbl.size.height / 2f))
         }
         val line = Path().apply {
             moveTo(x(0), y(values[0]))
@@ -276,24 +271,25 @@ fun AreaChart(labels: List<String>, values: List<Int>, color: Color, modifier: M
         }
         val fill = Path().apply { addPath(line); lineTo(x(n - 1), top + h); lineTo(x(0), top + h); close() }
         clipRect(left = 0f, top = 0f, right = size.width * progress.value, bottom = size.height) {
-            drawPath(fill, Brush.verticalGradient(listOf(color.copy(alpha = 0.35f), Color.Transparent), startY = top, endY = top + h))
-            drawPath(line, color, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+            drawPath(fill, Brush.verticalGradient(listOf(color.copy(alpha = 0.42f), color.copy(alpha = 0.04f)), startY = top, endY = top + h))
+            drawPath(line, color.copy(alpha = 0.22f), style = Stroke(width = 7.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+            drawPath(line, color, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
         }
-        val step = ceil(n / 6.0).toInt().coerceAtLeast(1)
+        val step = ceil(n / 5.0).toInt().coerceAtLeast(1)
         for (i in 0 until n step step) {
             val lbl = measurer.measure(labels[i].takeLast(5), axis)
-            drawText(lbl, topLeft = Offset(x(i) - lbl.size.width / 2f, size.height - bottom + 8f))
+            drawText(lbl, topLeft = Offset((x(i) - lbl.size.width / 2f).coerceIn(0f, size.width - lbl.size.width), size.height - bottom + 9f))
         }
         sel?.let { i ->
-            drawLine(color.copy(alpha = 0.35f), Offset(x(i), top), Offset(x(i), top + h), strokeWidth = 1.5f)
-            drawCircle(p.card, 7.dp.toPx(), Offset(x(i), y(values[i])))
-            drawCircle(color, 4.5.dp.toPx(), Offset(x(i), y(values[i])))
-            val tip = measurer.measure("${labels[i]}: ${fmt(values[i])}", TextStyle(fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.SemiBold))
-            val tw = tip.size.width + 24f
+            drawLine(color.copy(alpha = 0.35f), Offset(x(i), top), Offset(x(i), top + h), strokeWidth = 1.2f)
+            drawCircle(Color.White, 6.dp.toPx(), Offset(x(i), y(values[i])))
+            drawCircle(color, 3.8.dp.toPx(), Offset(x(i), y(values[i])))
+            val tip = measurer.measure("${labels[i]}: ${fmt(values[i])}", TextStyle(fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.SemiBold))
+            val tw = tip.size.width + 22f
             val tx = (x(i) - tw / 2).coerceIn(0f, size.width - tw)
-            val ty = (y(values[i]) - tip.size.height - 26f).coerceAtLeast(0f)
-            drawRoundRect(Color(0xE61A1D2E), Offset(tx, ty), Size(tw, tip.size.height + 14f), CornerRadius(14f))
-            drawText(tip, topLeft = Offset(tx + 12f, ty + 7f))
+            val ty = (y(values[i]) - tip.size.height - 22f).coerceAtLeast(0f)
+            drawRoundRect(Color(0xE61A1D2E), Offset(tx, ty), Size(tw, tip.size.height + 12f), CornerRadius(12f))
+            drawText(tip, topLeft = Offset(tx + 11f, ty + 6f))
         }
     }
 }
@@ -304,22 +300,26 @@ fun ColumnChart(values: List<Int>, labelOf: (Int) -> String, color: Color, modif
     val measurer = rememberTextMeasurer()
     val progress = remember { Animatable(0f) }
     LaunchedEffect(values) { progress.snapTo(0f); progress.animateTo(1f, tween(1000, easing = FastOutSlowInEasing)) }
-    val axis = TextStyle(fontSize = 10.sp, color = p.mut)
+    val axis = TextStyle(fontSize = 9.sp, color = p.mut)
     val maxV = max(1, values.maxOrNull() ?: 1)
-    Canvas(modifier.fillMaxWidth().height(160.dp)) {
-        val left = 30.dp.toPx(); val bottom = 22.dp.toPx(); val top = 6.dp.toPx()
+    Canvas(modifier.fillMaxWidth().height(104.dp)) {
+        val left = 26.dp.toPx(); val bottom = 18.dp.toPx(); val top = 4.dp.toPx()
         val w = size.width - left; val h = size.height - bottom - top
         val bw = w / values.size
         drawLine(p.line, Offset(left, top + h), Offset(size.width, top + h), strokeWidth = 1f)
         val top1 = measurer.measure(fmt(maxV), axis)
-        drawText(top1, topLeft = Offset(left - 6f - top1.size.width, top))
+        drawText(top1, topLeft = Offset(left - 5f - top1.size.width, top))
         values.forEachIndexed { i, v ->
             val k = (progress.value * 1.6f - i.toFloat() / values.size * 0.6f).coerceIn(0f, 1f)
             val bh = v.toFloat() / maxV * h * k
-            drawRoundRect(color.copy(alpha = 0.9f), Offset(left + i * bw + 2f, top + h - bh), Size((bw - 4f).coerceAtLeast(2f), bh), CornerRadius(6f))
-            if (i % 3 == 0) {
+            val bx = left + i * bw + bw * 0.16f
+            drawRoundRect(
+                Brush.verticalGradient(listOf(color, color.copy(alpha = 0.35f)), startY = top + h - bh, endY = top + h),
+                Offset(bx, top + h - bh), Size((bw * 0.68f).coerceAtLeast(2f), bh), CornerRadius(5f),
+            )
+            if (i % 4 == 0) {
                 val l = measurer.measure(labelOf(i), axis)
-                drawText(l, topLeft = Offset(left + i * bw + bw / 2 - l.size.width / 2f, size.height - bottom + 5f))
+                drawText(l, topLeft = Offset(left + i * bw + bw / 2 - l.size.width / 2f, size.height - bottom + 4f))
             }
         }
     }
@@ -330,26 +330,26 @@ fun SiteBars(sites: List<SiteStat>) {
     val p = palette()
     if (sites.isEmpty()) { Empty("No websites yet."); return }
     val maxV = max(1, sites.maxOf { it.visits })
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         sites.forEachIndexed { i, s ->
             val frac by animateFloatAsState(s.visits.toFloat() / maxV, tween(900, delayMillis = 120 + i * 60, easing = FastOutSlowInEasing), label = "bar")
             var started by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) { started = true }
             val shown = if (started) frac else 0f
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Avatar(s.domain, 32.dp, square = true, text = s.domain.take(1).uppercase())
-                Spacer(Modifier.width(12.dp))
+                Avatar(s.domain, 28.dp, square = true, text = s.domain.take(1).uppercase())
+                Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(s.domain, color = p.pri, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 14.sp)
-                    Spacer(Modifier.height(6.dp))
-                    Box(Modifier.fillMaxWidth().height(7.dp).clip(CircleShape).background(p.soft)) {
-                        Box(Modifier.fillMaxWidth(shown.coerceIn(0.03f, 1f)).fillMaxSize().clip(CircleShape).background(Brush.horizontalGradient(listOf(p.pri, p.violet))))
+                    Text(s.domain, color = p.ink, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
+                    Spacer(Modifier.height(4.dp))
+                    Box(Modifier.fillMaxWidth().height(5.dp).clip(CircleShape).background(p.soft)) {
+                        Box(Modifier.fillMaxWidth(shown.coerceIn(0.03f, 1f)).fillMaxSize().clip(CircleShape).background(Brush.horizontalGradient(listOf(p.pri, p.cyan))))
                     }
                 }
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(10.dp))
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("${fmt(s.visits)} visits", color = p.ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                    Text("${dur(s.totalMs)} · ${fmt(s.users)} user${if (s.users == 1) "" else "s"}", color = p.mut, fontSize = 11.sp)
+                    Text("${fmt(s.visits)} visits", color = p.ink, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                    Text("${dur(s.totalMs)} · ${fmt(s.users)}u", color = p.mut, fontSize = 10.sp)
                 }
             }
         }

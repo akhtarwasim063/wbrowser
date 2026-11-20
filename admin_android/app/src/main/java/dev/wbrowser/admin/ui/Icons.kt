@@ -33,12 +33,50 @@ private val ICONS = mapOf(
     "check" to "M20 6L9 17l-5-5",
     "mail" to "M4 4h16a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2z|M22 6l-10 7L2 6",
     "eye" to "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z|M12 15a3 3 0 100-6 3 3 0 000 6z",
+    "back" to "M19 12H5|M12 19l-7-7 7-7",
+    "chev" to "M9 18l6-6-6-6",
+    "trash" to "M3 6h18|M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2|M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6",
+    "pause" to "M6 4h4v16H6z|M14 4h4v16h-4z",
+    "download" to "M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4|M7 10l5 5 5-5|M12 15V3",
+    "search" to "M11 19a8 8 0 100-16 8 8 0 000 16z|M21 21l-4.3-4.3",
+    "db" to "M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z|M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6|M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6",
     "gear" to "M12 15a3 3 0 100-6 3 3 0 000 6z|M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z",
 )
 
+/**
+ * Re-writes an SVG path so every number is space separated. SVG allows packed arc flags ("a10 10 0 100 20"),
+ * which Compose's PathParser reads wrongly, so arcs are tokenised by hand here.
+ */
+private fun spaced(d: String): String {
+    val out = StringBuilder()
+    var i = 0
+    var cmd = ' '
+    var argIdx = 0
+    fun number(): String {
+        val st = i
+        if (d[i] == '-' || d[i] == '+') i++
+        var dot = false
+        while (i < d.length && (d[i].isDigit() || (d[i] == '.' && !dot))) { if (d[i] == '.') dot = true; i++ }
+        return d.substring(st, i)
+    }
+    while (i < d.length) {
+        val c = d[i]
+        when {
+            c.isLetter() -> { cmd = c; argIdx = 0; out.append(c).append(' '); i++ }
+            c == ' ' || c == ',' -> i++
+            else -> {
+                val arc = cmd == 'a' || cmd == 'A'
+                if (arc && (argIdx % 7 == 3 || argIdx % 7 == 4)) { out.append(d[i]).append(' '); i++ } else out.append(number()).append(' ')
+                argIdx++
+            }
+        }
+    }
+    return out.toString()
+}
+
 @Composable
 fun Ico(name: String, tint: Color, size: Dp = 22.dp, modifier: Modifier = Modifier, strokeWidth: Float = 1.9f) {
-    val paths = remember(name) { (ICONS[name] ?: "").split('|').filter { it.isNotEmpty() }.map { PathParser().parsePathString(it).toPath() } }
+    val paths = remember(name) { (ICONS[name] ?: "").split('|').filter { it.isNotEmpty() }.map { PathParser().parsePathString(spaced(it)).toPath() } }
     Canvas(modifier.size(size)) {
         val s = this.size.minDimension / 24f
         scale(scale = s, pivot = Offset.Zero) {

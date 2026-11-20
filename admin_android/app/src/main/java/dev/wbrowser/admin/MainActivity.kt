@@ -19,6 +19,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import dev.wbrowser.admin.ui.AdminTheme
+import dev.wbrowser.admin.ui.CrystalBackground
+import dev.wbrowser.admin.ui.WithGlassMotion
 import dev.wbrowser.admin.ui.LoginScreen
 import dev.wbrowser.admin.ui.MainShell
 import dev.wbrowser.admin.ui.palette
@@ -34,9 +36,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            AdminTheme {
+            val mode by vm.themeMode.collectAsState()
+            AdminTheme(mode) {
+              WithGlassMotion {
                 val auth by vm.auth.collectAsState()
                 Box(Modifier.fillMaxSize().background(palette().bg)) {
+                    CrystalBackground()
                     AnimatedContent(auth, transitionSpec = { fadeIn(tween(350)) togetherWith fadeOut(tween(250)) }, contentKey = { it::class }, label = "auth") { s ->
                         when (s) {
                             is AuthState.Checking -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = palette().pri) }
@@ -45,6 +50,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+              }
             }
         }
     }

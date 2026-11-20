@@ -1,16 +1,16 @@
 package dev.wbrowser.admin
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.FirebaseTooManyRequestsException
 import com.google.firebase.auth.FirebaseAuthException
 import dev.wbrowser.admin.data.AdminRepo
 import dev.wbrowser.admin.data.DateRange
-import dev.wbrowser.admin.data.Load
 import dev.wbrowser.admin.data.Me
-import dev.wbrowser.admin.data.Overview
 import dev.wbrowser.admin.data.Presence
+import dev.wbrowser.admin.ui.ThemeMode
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,25 +23,47 @@ sealed interface AuthState {
     data class SignedIn(val me: Me) : AuthState
 }
 
-class AdminViewModel : ViewModel() {
-    private val repo = AdminRepo()
+/** Screens that open on top of the four tabs. */
+sealed interface Route {
+    data object Sessions : Route
+    data class Website(val domain: String) : Route
+    data class User(val uid: String) : Route
+    data object Admins : Route
+    data object Audit : Route
+    data object Server : Route
+    data object Config : Route
+    data object Account : Route
+}
+
+class AdminViewModel(app: Application) : AndroidViewModel(app) {
+    val repo = AdminRepo()
+    private val prefs = app.getSharedPreferences("admin", android.content.Context.MODE_PRIVATE)
+
+    private val _themeMode = MutableStateFlow(runCatching { ThemeMode.valueOf(prefs.getString("theme", null) ?: "Auto") }.getOrDefault(ThemeMode.Auto))
+    val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
+    fun setTheme(m: ThemeMode) { _themeMode.value = m; prefs.edit().putString("theme", m.name).apply() }
+
+    private val _defaultRange = MutableStateFlow(runCatching { DateRange.valueOf(prefs.getString("range", null) ?: "D7") }.getOrDefault(DateRange.D7))
+    val defaultRange: StateFlow<DateRange> = _defaultRange.asStateFlow()
+
+    /** The date range shared by every analytics screen (like the web console's filter). */
+    private val _range = MutableStateFlow(_defaultRange.value)
+    val range: StateFlow<DateRange> = _range.asStateFlow()
+    fun selectRange(r: DateRange) { _range.value = r }
+    fun setDefaultRange(r: DateRange) { _defaultRange.value = r; _range.value = r; prefs.edit().putString("range", r.name).apply() }
 
     private val _auth = MutableStateFlow<AuthState>(AuthState.Checking)
     val auth: StateFlow<AuthState> = _auth.asStateFlow()
 
-    private val _range = MutableStateFlow(DateRange.D7)
-    val range: StateFlow<DateRange> = _range.asStateFlow()
-
-    private val _overview = MutableStateFlow<Load<Overview>>(Load.Loading)
-    val overview: StateFlow<Load<Overview>> = _overview.asStateFlow()
-
-    private val _refreshing = MutableStateFlow(false)
-    val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
-
     private val _presence = MutableStateFlow<Map<String, Presence>>(emptyMap())
     val presence: StateFlow<Map<String, Presence>> = _presence.asStateFlow()
-
     private var presenceJob: Job? = null
+
+    private val _stack = MutableStateFlow<List<Route>>(emptyList())
+    val stack: StateFlow<List<Route>> = _stack.asStateFlow()
+    fun push(r: Route) { _stack.value = _stack.value + r }
+    fun pop() { if (_stack.value.isNotEmpty()) _stack.value = _stack.value.dropLast(1) }
+    fun popToRoot() { _stack.value = emptyList() }
 
     init {
         viewModelScope.launch {
@@ -54,7 +76,6 @@ class AdminViewModel : ViewModel() {
         _auth.value = AuthState.SignedIn(me)
         presenceJob?.cancel()
         presenceJob = viewModelScope.launch { repo.presence().collect { _presence.value = it } }
-        loadOverview()
     }
 
     fun signIn(email: String, password: String) {
@@ -79,27 +100,12 @@ class AdminViewModel : ViewModel() {
     fun signOut() {
         presenceJob?.cancel()
         repo.logout()
-        _overview.value = Load.Loading
         _presence.value = emptyMap()
+        _stack.value = emptyList()
         _auth.value = AuthState.SignedOut()
     }
 
-    fun selectRange(r: DateRange) {
-        if (r == _range.value) return
-        _range.value = r
-        loadOverview()
-    }
-
-    fun loadOverview() {
-        viewModelScope.launch {
-            _refreshing.value = true
-            try { _overview.value = Load.Ready(repo.overview(_range.value)) }
-            catch (e: Exception) { if (_overview.value !is Load.Ready) _overview.value = Load.Failed(friendly(e)) }
-            finally { _refreshing.value = false }
-        }
-    }
-
-    private fun friendly(e: Exception): String = when (e) {
+    fun friendly(e: Throwable): String = when (e) {
         is AdminRepo.Forbidden -> "This account is not an administrator."
         is FirebaseTooManyRequestsException -> "Too many attempts. Try again later."
         is FirebaseNetworkException -> "No internet connection."
