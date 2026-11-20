@@ -4,7 +4,7 @@ import android.net.Uri
 
 /**
  * Privacy minimisation applied ON DEVICE before anything is queued for upload
- * (the server applies the same rules again; keep tracking_backend/src/sanitize.js in sync).
+ * (the server applies the same rules again).
  */
 object Sanitizer {
     data class Clean(val url: String, val domain: String)
