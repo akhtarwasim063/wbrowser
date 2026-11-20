@@ -148,6 +148,12 @@
             app:key="auto_pip"
             app:summary="When a video is playing and you go to the home screen, float it in a small window with play/pause and seek buttons."
             app:title="Auto mini-player" />
+        <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:iconSpaceReserved="false"
+            app:key="yt_desktop"
+            app:summary="YouTube's mobile site pauses the video as soon as you leave the app. Its desktop version keeps playing, so YouTube opens as the desktop site (still fitted to your screen)."
+            app:title="YouTube: desktop site for background play" />
     </PreferenceCategory>
 
     <PreferenceCategory app:title="Account" app:iconSpaceReserved="false">

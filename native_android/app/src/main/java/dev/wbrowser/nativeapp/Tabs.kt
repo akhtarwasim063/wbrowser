@@ -146,6 +146,21 @@ class BrowserTab(private val host: TabHost, val isPrivate: Boolean) {
         return true
     }
 
+    /**
+     * YouTube's MOBILE site pauses its player the moment the app leaves the screen (it is built to push "YouTube Premium" for
+     * background play). Its DESKTOP site does not, which is why "request desktop site" is the well-known way to get background
+     * play in Firefox on Android. So YouTube pages are loaded with the desktop user agent (still with the phone viewport, so the
+     * layout stays responsive) unless the user turned that off in Settings. Leaving YouTube restores the normal mobile agent.
+     */
+    private var ytDesktop = false
+    private fun isYoutubeFamily(host: String) = host == "youtu.be" || listOf("youtube.com", "google.com", "googleusercontent.com", "gstatic.com", "ytimg.com", "googlevideo.com")
+        .any { host == it || host.endsWith(".$it") }
+    private fun isYoutube(host: String) = host == "youtu.be" || host == "youtube.com" || host.endsWith(".youtube.com")
+    private fun setYoutubeAgent(on: Boolean) {
+        ytDesktop = on
+        session.settings.userAgentMode = if (on) GeckoSessionSettings.USER_AGENT_MODE_DESKTOP else GeckoSessionSettings.USER_AGENT_MODE_MOBILE
+    }
+
     val isNewTab get() = Prefs.isNewTab(url)
     val loading get() = progress in 1..99
 
@@ -294,6 +309,12 @@ class BrowserTab(private val host: TabHost, val isPrivate: Boolean) {
                             Intent(Intent.ACTION_VIEW, Uri.parse(r.uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                     }
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
+                }
+                // YouTube desktop site for background play (see above). The agent only changes for a fresh load, so deny and load again.
+                if (!desktop && Prefs.bool("yt_desktop", true)) {
+                    val host = Uri.parse(r.uri).host?.lowercase().orEmpty()
+                    if (isYoutube(host) && !ytDesktop) { setYoutubeAgent(true); s.loadUri(r.uri); return GeckoResult.fromValue(AllowOrDeny.DENY) }
+                    if (ytDesktop && host.isNotEmpty() && !isYoutubeFamily(host)) { setYoutubeAgent(false); s.loadUri(r.uri); return GeckoResult.fromValue(AllowOrDeny.DENY) }
                 }
                 return null
             }

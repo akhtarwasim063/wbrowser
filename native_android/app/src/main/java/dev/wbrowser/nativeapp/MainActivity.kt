@@ -2,6 +2,8 @@ package dev.wbrowser.nativeapp
 
 import android.app.DownloadManager
 import android.app.PictureInPictureParams
+import androidx.core.view.ViewCompat
+import android.view.WindowManager
 import android.os.SystemClock
 import android.graphics.drawable.Icon
 import android.app.RemoteAction
@@ -412,14 +414,14 @@ class MainActivity : AppCompatActivity(), TabHost {
         if (deltaY == 0) return
         if (scrollAccum != 0 && (deltaY > 0) != (scrollAccum > 0)) scrollAccum = 0   // direction changed
         scrollAccum += deltaY
-        if (scrollAccum > 140 && !barsHiddenByScroll) toggleBarsForScroll(true)
-        else if (scrollAccum < -70 && barsHiddenByScroll) toggleBarsForScroll(false)
+        if (scrollAccum > 70 && !barsHiddenByScroll) toggleBarsForScroll(true)
+        else if (scrollAccum < -45 && barsHiddenByScroll) toggleBarsForScroll(false)
     }
 
     private fun toggleBarsForScroll(hide: Boolean) {
         barsHiddenByScroll = hide
         scrollAccum = 0
-        scrollIgnoreUntil = android.os.SystemClock.uptimeMillis() + 450
+        scrollIgnoreUntil = android.os.SystemClock.uptimeMillis() + 300
         android.util.Log.d("WBScroll", "bars hidden=$hide")
         ui.post { setBarsHidden(hide) }
     }
@@ -845,6 +847,29 @@ class MainActivity : AppCompatActivity(), TabHost {
         WindowCompat.getInsetsController(window, window.decorView).apply {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             if (on) hide(WindowInsetsCompat.Type.systemBars()) else show(WindowInsetsCompat.Type.systemBars())
+        }
+        edgeToEdge(on)
+    }
+
+    /**
+     * Video full screen = the video really uses the whole phone: no status/navigation bar, no padding around the camera
+     * cut-out, and the screen turns to landscape for landscape video (portrait video such as Shorts stays portrait).
+     * Leaving full screen restores the normal padding and lets the phone rotate freely again.
+     */
+    private fun edgeToEdge(on: Boolean) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val lp = window.attributes
+            lp.layoutInDisplayCutoutMode = if (on) WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+            window.attributes = lp
+        }
+        root.fitsSystemWindows = !on
+        if (on) root.setPadding(0, 0, 0, 0) else ViewCompat.requestApplyInsets(root)
+        val t = current
+        val portraitVideo = t != null && t.videoHeight > t.videoWidth && t.videoWidth > 0
+        requestedOrientation = when {
+            !on -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            portraitVideo -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            else -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         }
     }
 
