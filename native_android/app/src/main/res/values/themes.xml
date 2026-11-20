@@ -23,8 +23,7 @@
         <item name="bottomSheetStyle">@style/WB.BottomSheet</item>
     </style>
     <style name="WB.BottomSheet" parent="Widget.Material3.BottomSheet.Modal">
-        <item name="android:background">@drawable/bg_sheet</item>
-        <item name="backgroundTint">@null</item>
+        <item name="backgroundTint">@color/wb_sheet</item>
     </style>
     <style name="WB.Icon" parent="">
         <item name="android:layout_width">40dp</item>

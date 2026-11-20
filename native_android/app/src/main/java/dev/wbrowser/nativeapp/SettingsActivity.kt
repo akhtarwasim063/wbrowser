@@ -17,6 +17,7 @@ class SettingsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         val toolbar = MaterialToolbar(this).apply {
             title = "Settings"
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
             setNavigationIcon(R.drawable.ic_arrow_back)
             setNavigationIconTint(com.google.android.material.color.MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurface))
             setNavigationOnClickListener { finish() }
@@ -25,6 +26,7 @@ class SettingsActivity : AppCompatActivity() {
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             fitsSystemWindows = true
+            setBackgroundResource(R.drawable.bg_crystal)
             addView(toolbar, LinearLayout.LayoutParams(-1, (56 * resources.displayMetrics.density).toInt()))
             addView(container, LinearLayout.LayoutParams(-1, 0, 1f))
         })
@@ -35,6 +37,12 @@ class SettingsActivity : AppCompatActivity() {
 
     class PrefsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedPreferenceChangeListener {
         private val statusListener: () -> Unit = { findPreference<Preference>("ubo_status")?.summary = Engine.uboStatus }
+
+        override fun onViewCreated(view: android.view.View, savedInstanceState: Bundle?) {
+            super.onViewCreated(view, savedInstanceState)
+            view.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            listView?.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        }
 
         override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
             setPreferencesFromResource(R.xml.preferences, rootKey)

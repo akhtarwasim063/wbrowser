@@ -801,6 +801,7 @@ class MainActivity : AppCompatActivity(), TabHost {
         item(R.drawable.ic_desktop, "Desktop site", t.desktop) { t.setDesktop(!t.desktop) }
         item(R.drawable.ic_settings, "Settings") { startActivity(Intent(this, SettingsActivity::class.java)) }
         dlg.setContentView(scroll)
+        dlg.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)?.setBackgroundResource(R.drawable.bg_sheet)
         dlg.show()
     }
 
@@ -838,6 +839,7 @@ class MainActivity : AppCompatActivity(), TabHost {
         }
         refresh()
         dlg.setContentView(v)
+        dlg.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)?.setBackgroundResource(R.drawable.bg_sheet)
         dlg.show()
     }
 
